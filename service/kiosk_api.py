@@ -41,6 +41,7 @@ class KioskState(BaseModel):
     worker_name: str
     shift_label: str
     worker_stats: Optional[str]
+    session_count_today: int
 
     # Смена/команда
     shift_active: bool = False
@@ -120,6 +121,7 @@ async def get_state():
         worker_name=ui.worker_name,
         shift_label=ui.shift_label,
         worker_stats=ui.worker_stats,
+        session_count_today=ui.session_count_today,
         shift_active=ui.shift_active,
         active_workers=ui.active_workers,
         bed_title=ui.bed_title,

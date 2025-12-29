@@ -175,3 +175,24 @@ def get_worker_active_centers(worker_id: str) -> list[str]:
     rows = cur.fetchall() or []
     conn.close()
     return [r["work_center"] for r in rows]
+
+
+def count_sessions_since(start_time: float, worker_id: str | None = None) -> int:
+    worker_id = (worker_id or "").strip()
+    conn = get_conn()
+    cur = conn.cursor()
+    if worker_id:
+        cur.execute(
+            """SELECT COUNT(*) AS cnt FROM sessions
+               WHERE start_time >= ? AND worker_id = ?""",
+            [start_time, worker_id],
+        )
+    else:
+        cur.execute(
+            """SELECT COUNT(*) AS cnt FROM sessions
+               WHERE start_time >= ?""",
+            [start_time],
+        )
+    row = cur.fetchone()
+    conn.close()
+    return int(row["cnt"] if row else 0)
