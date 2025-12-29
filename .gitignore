@@ -33,3 +33,7 @@ weights/
 # DB files
 *.db
 storage/*.db
+
+# local helper files
+codex.patch
+tools/
