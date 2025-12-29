@@ -1,0 +1,35 @@
+# ===== Python =====
+venv/
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ===== VS Code =====
+.vscode/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Logs =====
+*.log
+
+# ===== CV / ML =====
+*.pt
+*.pth
+*.onnx
+*.engine
+datasets/
+data/
+weights/
+
+# ===== Archives =====
+*.zip
+*.tar
+*.gz
+
+# DB files
+*.db
+storage/*.db

@@ -1,0 +1,560 @@
+import time
+import threading
+from dataclasses import dataclass, field
+from typing import List, Literal, Optional
+
+from core.session import PackSession
+from core.storage import (
+    init_db,
+    save_session,
+    start_worker_shift,
+    end_worker_shift,
+    get_active_shifts,
+)
+from core.voice import say
+from core.beds_catalog import get_bed_info
+# from core.detector import Detector  # подключим, когда будем работать с видео
+
+
+# ────────────────────────
+# DTO для фронта (UI state)
+# ────────────────────────
+
+@dataclass
+class OverlaySlotDTO:
+    id: int
+    x: float
+    y: float
+    w: float
+    h: float
+    status: Literal["pending", "current", "done"]
+    title: str = ""
+
+
+@dataclass
+class StepDTO:
+    index: int
+    title: str
+    status: Literal["pending", "current", "done", "error"]
+    meta: str = ""
+
+
+@dataclass
+class EventDTO:
+    ts_epoch: float
+    time: str
+    text: str
+    level: Literal["info", "warning", "error"] = "info"
+
+
+@dataclass
+class KioskUIState:
+    worker_name: str
+    shift_label: str
+    worker_stats: str
+
+    # Смена/команда (для кнопок и модалки)
+    shift_active: bool
+    active_workers: List[dict]
+
+
+    bed_title: str
+    bed_sku: str
+    bed_details: str
+
+    status: Literal["idle", "running", "error", "done"]
+    worker_state: Literal["working", "idle"]
+
+    started_at_epoch: Optional[float]
+    work_seconds: int
+    idle_seconds: int
+
+    last_pack_seconds: int
+    best_pack_seconds: int
+    avg_pack_seconds: int
+
+    instruction_main: str
+    instruction_sub: str
+    instruction_extra: str
+
+    current_step_index: int
+    total_steps: int
+    completed_steps: int
+    error_steps: int
+    steps: List[StepDTO] = field(default_factory=list)
+
+    events: List[EventDTO] = field(default_factory=list)
+
+    camera_stream_url: str = ""
+    overlay_slots: List[OverlaySlotDTO] = field(default_factory=list)
+
+
+# ────────────────────────
+# KioskEngine
+# ────────────────────────
+
+
+class KioskEngine:
+    """
+    Один экземпляр на киоск (на рабочее место).
+    Управляет текущей сессией упаковки и возвращает состояние для фронта.
+    """
+
+    TOTAL_STEPS = 6
+    STEP_DURATION = 15.0  # секунд на один шаг
+    TARGET_PACK_TIME = TOTAL_STEPS * STEP_DURATION
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+
+        # инициализируем базу
+        init_db()
+
+        # текущая сессия
+        self._session: Optional[PackSession] = None
+        self._session_start_ts: Optional[float] = None
+
+        # временная "заглушка" по SKU (потом заменим на реальные данные из БД)
+        self._last_pack_per_sku = {}  # sku -> last_sec
+        self._best_pack_per_sku = {}
+        self._avg_pack_per_sku = {}
+
+        # статический поток камеры (потом вынесём в конфиг)
+        self.camera_stream_url = "http://127.0.0.1:8080/stream"
+
+        # кэш активных смен (для быстрого состояния UI)
+        self._active_shifts_cache: list[dict] = []
+
+    
+    
+    def _normalize_scan(self, s: Optional[str]) -> str:
+        if not s:
+            return ""
+        s = s.strip()
+        # раскладка RU -> EN для сканера-клавиатуры
+        s = s.replace("Ю", ".").replace("ю", ".").replace("Б", ",").replace("б", ",")
+        return s
+
+    def set_worker(self, worker_id: str, worker_name: Optional[str], shift_label: Optional[str]) -> None:
+        with self._lock:
+            wid = self._normalize_scan(worker_id)
+            self._current_worker_name = worker_name or wid or "—"
+            self._current_shift_label = shift_label or "Смена не выбрана"
+
+    # ─── смены/РЦ ───
+
+    def add_worker_to_shift(self, worker_id: str, work_center: str) -> None:
+        """Открывает смену сотрудника на выбранном РЦ (УПАКОВКА/УКОМПЛЕКТОВКА)."""
+        wid = self._normalize_scan(worker_id)
+        wc = (work_center or "").strip().upper()
+        if not wid or not wc:
+            return
+        start_worker_shift(wid, wc)
+        self._active_shifts_cache = get_active_shifts()
+
+        # для верхней карточки показываем «текущего» сотрудника, если ещё не задан
+        if getattr(self, "_current_worker_name", "—") in ("—", ""):
+            self._current_worker_name = wid
+
+    def close_worker_shift(self, worker_id: str, work_centers: Optional[list[str]] = None) -> int:
+        wid = self._normalize_scan(worker_id)
+        if not wid:
+            return 0
+        n = end_worker_shift(wid, work_centers=work_centers)
+        self._active_shifts_cache = get_active_shifts()
+        return n
+
+    def set_bed(self, product_code: str) -> None:
+        code = self._normalize_scan(product_code)
+        if not code:
+            return
+        info = get_bed_info(code)
+        bed_title = info.title if info else f"Кровать {code}"
+        bed_details = info.details if info else "Размер — | Цвет — | Вид —"
+        with self._lock:
+            self._current_bed_sku = code
+            self._current_bed_title = bed_title
+            self._current_bed_details = bed_details
+
+
+
+   
+    # ─── управление сессией ───
+
+    def start_session(
+        self,
+        worker_id: str,
+        worker_name: Optional[str] = None,
+        product_code: Optional[str] = None,
+        sku: Optional[str] = None,
+        bed_title: str = "",
+        bed_details: str = "",
+        shift_label: str = "Смена не выбрана",
+    ) -> None:
+        """
+        Старт новой сессии упаковки.
+        (потом повесим на скан QR)
+        """
+        # product_code — внутренний ключ. Иногда фронт присылает sku.
+        code = self._normalize_scan(product_code or sku)
+        if not code:
+            return
+
+
+        info = get_bed_info(code)
+        if info:
+            bed_title = info.title
+            bed_details = info.details
+        else:
+            # если в каталоге нет — хотя бы показываем SKU
+            if not bed_title:
+                bed_title = "Кровать " + code
+            if not bed_details:
+                bed_details = "Размер — | Цвет — | Вид —"
+        with self._lock:
+            self._session = PackSession(
+                worker_id=worker_id,
+                product_code=code,
+                start_time=time.time(),
+                status="running",
+            )
+            self._session_start_ts = self._session.start_time
+
+            # простая голосовая подсказка
+            say(f"Начинаем упаковку: {bed_title}")
+
+            # FIXME: здесь потом можно инициализировать список шагов по SKU
+            self._current_worker_name = (worker_name or worker_id)
+            self._current_shift_label = shift_label
+            self._current_bed_sku = code
+            self._current_bed_title = bed_title
+            self._current_bed_details = bed_details
+
+    def finish_session(self, status: str = "done") -> None:
+        with self._lock:
+            if not self._session:
+                return
+
+            self._session.finish(status=status)
+            save_session(self._session)
+
+            total_sec = int(self._session.worktime_sec + self._session.downtime_sec)
+            sku = self._session.product_code
+
+            self._last_pack_per_sku[sku] = total_sec
+
+            best = self._best_pack_per_sku.get(sku)
+            if best is None or total_sec < best:
+                self._best_pack_per_sku[sku] = total_sec
+
+            # простая "средняя" по 2 значениям (для примера)
+            avg_prev = self._avg_pack_per_sku.get(sku)
+            if avg_prev is None:
+                self._avg_pack_per_sku[sku] = total_sec
+            else:
+                self._avg_pack_per_sku[sku] = int((avg_prev + total_sec) / 2)
+
+            say("Упаковка завершена")
+
+            self._session = None
+            self._session_start_ts = None
+
+    def _finish_session_locked(self, status: str = "done") -> None:
+        #ВНИМАНИЕ: эту функцию вызываем ТОЛЬКО тогда, когда self._lock УЖЕ взят!
+
+         #   Почему так:
+         #   - get_ui_state() уже работает внутри "with self._lock:"
+         #     - а finish_session() снова пытается взять self._lock
+         #    - это может привести к зависанию (deadlock)
+
+         #    Поэтому делаем "внутреннюю" версию завершения сессии без повторного lock.
+    
+        if not self._session:
+            return  # если сессии нет — нечего завершать
+
+        # 1) фиксируем завершение сессии
+        self._session.finish(status=status)
+
+        # 2) сохраняем в базу
+        save_session(self._session)
+
+        # 3) считаем время (работа+простой), чтобы обновить "последнее / лучшее / среднее"
+        total_sec = int(self._session.worktime_sec + self._session.downtime_sec)
+        sku = self._session.product_code
+
+        # "Последняя упаковка"
+        self._last_pack_per_sku[sku] = total_sec
+
+        # "Лучшее время"
+        best = self._best_pack_per_sku.get(sku)
+        if best is None or total_sec < best:
+            self._best_pack_per_sku[sku] = total_sec
+
+        # "Среднее время" — пока простая формула (потом можно по-настоящему)
+        avg_prev = self._avg_pack_per_sku.get(sku)
+        if avg_prev is None:
+            self._avg_pack_per_sku[sku] = total_sec
+        else:
+            self._avg_pack_per_sku[sku] = int((avg_prev + total_sec) / 2)
+
+        # голос
+        say("Упаковка завершена")
+
+        # 4) очищаем текущую сессию в памяти (важно!)
+        self._session = None
+        self._session_start_ts = None
+
+
+    # ─── внутренняя "симуляция" шагов ───
+
+    def _build_steps_and_slots(self, now: float):
+        """
+        Пока что симуляция, завязанная на время.
+        Позже сюда встраиваем результаты YOLO + правила проверки.
+        """
+        if not self._session_start_ts:
+            # нет активной сессии — шаги пустые
+            return 0, 0, [], []
+
+        elapsed = now - self._session_start_ts
+
+        raw_step_index = int(elapsed // self.STEP_DURATION)
+        current_step_index = min(max(raw_step_index + 1, 0), self.TOTAL_STEPS)
+        completed_steps = min(max(raw_step_index, 0), self.TOTAL_STEPS)
+
+        # шаги
+        steps: List[StepDTO] = []
+        for i in range(self.TOTAL_STEPS):
+            if i < completed_steps:
+                st = "done"
+            elif i == current_step_index - 1:
+                st = "current"
+            else:
+                st = "pending"
+
+            steps.append(
+                StepDTO(
+                    index=i,
+                    title=f"Положите деталь {i + 1} в подсвеченную зону",
+                    status=st,
+                    meta="Проверьте ориентацию детали.",
+                )
+            )
+
+        # слоты
+        slots: List[OverlaySlotDTO] = []
+        for i in range(self.TOTAL_STEPS):
+            if i < completed_steps:
+                st = "done"
+            elif i == current_step_index - 1:
+                st = "current"
+            else:
+                st = "pending"
+
+            slots.append(
+                OverlaySlotDTO(
+                    id=i,
+                    x=0.06 + 0.15 * i,
+                    y=0.18 if i % 2 == 0 else 0.38,
+                    w=0.12,
+                    h=0.18,
+                    status=st,
+                    title=f"Деталь {i + 1}",
+                )
+            )
+
+        return current_step_index, completed_steps, steps, slots
+
+    def _build_events(self, now: float, completed_steps: int) -> List[EventDTO]:
+        events: List[EventDTO] = []
+
+        if self._session_start_ts:
+            t0 = self._session_start_ts
+            events.append(
+                EventDTO(
+                    ts_epoch=t0,
+                    time=time.strftime("%H:%M", time.localtime(t0)),
+                    text="Сессия упаковки запущена",
+                    level="info",
+                )
+            )
+
+            for i in range(completed_steps):
+                ts = t0 + (i + 1) * self.STEP_DURATION
+                if ts > now:
+                    continue
+                events.append(
+                    EventDTO(
+                        ts_epoch=ts,
+                        time=time.strftime("%H:%M", time.localtime(ts)),
+                        text=f"Деталь {i + 1} успешно уложена",
+                        level="info",
+                    )
+                )
+
+        events_sorted = sorted(events, key=lambda e: e.ts_epoch, reverse=True)
+        return events_sorted[:6]
+
+    # ─── публичное состояние для фронта ───
+
+    def get_ui_state(self) -> KioskUIState:
+        with self._lock:
+            now = time.time()
+
+            # актуализируем список активных смен для UI
+            try:
+                self._active_shifts_cache = get_active_shifts()
+            except Exception:
+                # если БД временно недоступна — показываем то, что было
+                self._active_shifts_cache = getattr(self, "_active_shifts_cache", [])
+
+            shift_active = len(self._active_shifts_cache) > 0
+
+            # нет активной сессии — показываем ожидание
+            if not self._session:
+                return KioskUIState(
+                    worker_name=getattr(self, "_current_worker_name", "—"),
+                    shift_label=getattr(self, "_current_shift_label", "Смена не выбрана"),
+                    worker_stats="Сегодня: 0 кроватей, простоев 0 мин",
+                    shift_active=shift_active,
+                    active_workers=self._active_shifts_cache,
+                    bed_title=getattr(self, "_current_bed_title", "Кровать не выбрана"),
+                    bed_sku=getattr(self, "_current_bed_sku", "—"),
+                    bed_details=getattr(self, "_current_bed_details", "Размер — | Цвет — | Вид —"),
+                    status="idle",
+                    worker_state="idle",
+                    started_at_epoch=None,
+                    work_seconds=0,
+                    idle_seconds=0,
+                    last_pack_seconds=self._last_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
+                    best_pack_seconds=self._best_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
+                    avg_pack_seconds=self._avg_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
+                    instruction_main="Ожидание начала упаковки…",
+                    instruction_sub="Просканируйте QR-код кровати и сотрудника для старта.",
+                    instruction_extra="Голосовые подсказки повторяют текст.",
+                    current_step_index=0,
+                    total_steps=self.TOTAL_STEPS,
+                    completed_steps=0,
+                    error_steps=0,
+                    steps=[],
+                    events=[],
+                    camera_stream_url=self.camera_stream_url,
+                    overlay_slots=[],
+                )
+
+            # есть активная сессия
+            sess = self._session
+            elapsed = now - sess.start_time
+            status = sess.status
+
+            current_step_index, completed_steps, steps, slots = self._build_steps_and_slots(now)
+            events = self._build_events(now, completed_steps)
+
+                        # ─────────────────────────────────────────────────────────────
+            # АВТО-ЗАВЕРШЕНИЕ СЕССИИ В ЭМУЛЯЦИИ
+            #
+            # Сейчас шаги "идут по времени": 6 шагов * 15 секунд.
+            # Когда completed_steps дошёл до 6 — значит, все детали уложены.
+            #
+            # Нам нужно завершить сессию, чтобы:
+            # - остановился таймер
+            # - записалась статистика
+            # - статус стал "done"
+            #
+            # ВАЖНО:
+            # Мы НЕ вызываем finish_session(), потому что она снова берёт lock.
+            # Вместо этого вызываем _finish_session_locked(), потому что lock уже взят.
+            # ─────────────────────────────────────────────────────────────
+            if status == "running" and completed_steps >= self.TOTAL_STEPS:
+                # Добавим событие в ленту (приятно для UI)
+                # (события у нас строятся отдельно, но это объяснение логики)
+                # Завершаем сессию:
+                self._finish_session_locked(status="done")
+
+                # После завершения self._session стал None.
+                # Значит нужно вернуть UI в "idle/done".
+                # Проще всего — вернуть state как будто "нет активной сессии".
+                return KioskUIState(
+                    worker_name=getattr(self, "_current_worker_name", "—"),
+                    shift_label=getattr(self, "_current_shift_label", "Смена не выбрана"),
+                    worker_stats="Сегодня: 0 кроватей, простоев 0 мин",
+                    shift_active=shift_active,
+                    active_workers=self._active_shifts_cache,
+                    bed_title=getattr(self, "_current_bed_title", "Кровать не выбрана"),
+                    bed_sku=getattr(self, "_current_bed_sku", "—"),
+                    bed_details=getattr(self, "_current_bed_details", "Размер — | Цвет — | Вид —"),
+                    status="done",                 # важно: показываем "Готово"
+                    worker_state="idle",
+                    started_at_epoch=None,          # таймер обнуляется
+                    work_seconds=work_sec,          # оставляем посчитанное
+                    idle_seconds=idle_sec,
+                    last_pack_seconds=self._last_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
+                    best_pack_seconds=self._best_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
+                    avg_pack_seconds=self._avg_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
+                    instruction_main="Комплект готов. Закройте коробку.",
+                    instruction_sub="Можно сканировать следующую кровать, если стол пустой.",
+                    instruction_extra="Этикетка печатается после определения 'коробка закрыта'.",
+                    current_step_index=self.TOTAL_STEPS,
+                    total_steps=self.TOTAL_STEPS,
+                    completed_steps=self.TOTAL_STEPS,
+                    error_steps=0,
+                    steps=steps,
+                    events=events,
+                    camera_stream_url=self.camera_stream_url,
+                    overlay_slots=slots,
+                )
+
+
+            work_sec = int(sess.worktime_sec)
+            idle_sec = int(sess.downtime_sec)
+
+            # пока грубо: считаем всю длительность как "работу"
+            if status == "running":
+                work_sec += int(elapsed)
+
+            sku = sess.product_code
+            last_pack = self._last_pack_per_sku.get(sku, 0)
+            best_pack = self._best_pack_per_sku.get(sku, 0)
+            avg_pack = self._avg_pack_per_sku.get(sku, 0)
+
+            return KioskUIState(
+                worker_name=getattr(self, "_current_worker_name", "—"),
+                shift_label=getattr(self, "_current_shift_label", "Смена не выбрана"),
+                worker_stats=f"Сегодня: 0 кроватей, простоев {idle_sec // 60} мин",
+                shift_active=shift_active,
+                active_workers=self._active_shifts_cache,
+                bed_title=getattr(self, "_current_bed_title", "Кровать не выбрана"),
+                bed_sku=sess.product_code,
+                bed_details=getattr(self, "_current_bed_details", "Размер — | Цвет — | Вид —"),
+                status=status,
+                worker_state="working" if status == "running" else "idle",
+                started_at_epoch=sess.start_time,
+                work_seconds=work_sec,
+                idle_seconds=idle_sec,
+                last_pack_seconds=last_pack,
+                best_pack_seconds=best_pack,
+                avg_pack_seconds=avg_pack,
+                instruction_main=(
+                    "Комплект готов. Закройте коробку."
+                    if status == "done"
+                    else f"Шаг {current_step_index}: уложите следующую деталь"
+                ),
+                instruction_sub=(
+                    "Проверьте, что все детали уложены и коробка закрыта."
+                    if status == "done"
+                    else "Положите деталь в подсвеченный слот на столе."
+                ),
+                instruction_extra="Следите за подсветкой и голосовыми подсказками.",
+                current_step_index=current_step_index,
+                total_steps=self.TOTAL_STEPS,
+                completed_steps=completed_steps,
+                error_steps=0,
+                steps=steps,
+                events=events,
+                camera_stream_url=self.camera_stream_url,
+                overlay_slots=slots,
+            )
+
+
+# Глобальный экземпляр для киоска
+engine = KioskEngine()

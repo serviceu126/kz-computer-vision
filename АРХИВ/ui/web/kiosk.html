@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Киоск упаковки кроватей</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+      color: #f5f5f5;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .header {
+      font-size: 32px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .info-row {
+      font-size: 24px;
+      margin: 5px 0;
+    }
+    .step {
+      margin-top: 30px;
+      font-size: 40px;
+      font-weight: bold;
+      color: #ffd54f;
+    }
+    .buttons {
+      margin-top: auto;
+      display: flex;
+      gap: 20px;
+    }
+    button {
+      font-size: 22px;
+      padding: 15px 25px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-start { background: #1976d2; color: white; }
+    .btn-next  { background: #43a047; color: white; }
+    .btn-error { background: #e53935; color: white; }
+    .btn-finish-ok { background: #00c853; color: white; }
+    .btn-finish-fail { background: #fb8c00; color: white; }
+    .status {
+      margin-top: 10px;
+      font-size: 20px;
+      color: #90caf9;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="header">Киоск упаковки кроватей</div>
+  <div class="info-row" id="worker">Сотрудник: —</div>
+  <div class="info-row" id="product">Модель: —</div>
+  <div class="info-row" id="timers">Работа: 0 c • Простой: 0 c</div>
+  <div class="step" id="step">Ожидание старта</div>
+  <div class="status" id="status">Статус: idle</div>
+
+  <div class="buttons">
+    <button class="btn-start" onclick="startSession()">Старт</button>
+    <button class="btn-next" onclick="sendAction('next')">Следующая деталь</button>
+    <button class="btn-error" onclick="sendAction('error')">Ошибка</button>
+    <button class="btn-finish-ok" onclick="sendAction('finish_ok')">Завершить ОК</button>
+    <button class="btn-finish-fail" onclick="sendAction('finish_fail')">Завершить с ошибкой</button>
+  </div>
+</div>
+
+<script>
+const API = "http://localhost:8000";
+
+async function startSession() {
+  const worker = prompt("ID сотрудника", "W001") || "W001";
+  const product = prompt("Код модели", "BED-160-GREY-01") || "BED-160-GREY-01";
+
+  const res = await fetch(API + "/api/session/start", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ worker_id: worker, product_code: product })
+  });
+  const data = await res.json();
+  render(data);
+}
+
+async function sendAction(action) {
+  const res = await fetch(API + "/api/session/step", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ action })
+  });
+  const data = await res.json();
+  render(data);
+}
+
+async function refreshStatus() {
+  try {
+    const res = await fetch(API + "/api/session/status");
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function render(state) {
+  document.getElementById("worker").innerText =
+    "Сотрудник: " + (state.worker_id || "—");
+  document.getElementById("product").innerText =
+    "Модель: " + (state.product_code || "—");
+  document.getElementById("timers").innerText =
+    "Работа: " + state.worktime_sec.toFixed(1) + " c • Простой: " + state.downtime_sec.toFixed(1) + " c";
+  document.getElementById("step").innerText = state.current_step;
+  document.getElementById("status").innerText = "Статус: " + state.status;
+}
+
+// каждые 2 секунды обновляем таймеры
+setInterval(refreshStatus, 2000);
+</script>
+</body>
+</html>
