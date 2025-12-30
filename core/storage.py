@@ -56,11 +56,27 @@ def init_db():
     ON worker_shifts(worker_id, is_active)
     """)
 
+    # Минимальная событийная модель (events).
+    # Зачем: даёт единый журнал ключевых фактов (старт/финиш/упаковка),
+    # чтобы потом строить отчёты без усложнения таблиц сессий и без ломки истории.
+    # Для метрик это важно тем, что packed_count можно получать простым COUNT по событиям.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY,
+        ts REAL,
+        type TEXT,
+        payload_json TEXT,
+        shift_id INTEGER NULL,
+        session_id INTEGER NULL,
+        worker_id TEXT NULL
+    )
+    """)
+
     conn.commit()
     conn.close()
 
 
-def save_session(session):
+def save_session(session) -> int:
     conn = get_conn()
     cur = conn.cursor()
 
@@ -84,8 +100,10 @@ def save_session(session):
         shift_id,
     ])
 
+    session_id = cur.lastrowid
     conn.commit()
     conn.close()
+    return int(session_id or 0)
 
 
 def start_worker_shift(worker_id: str, work_center: str) -> int:
@@ -238,3 +256,122 @@ def count_sessions_since(start_time: float, worker_id: str | None = None) -> int
     row = cur.fetchone()
     conn.close()
     return int(row["cnt"] if row else 0)
+
+
+def add_event(
+    type: str,
+    ts: float,
+    payload_json: str = "",
+    shift_id: int | None = None,
+    session_id: int | None = None,
+    worker_id: str | None = None,
+) -> int:
+    """
+    Добавляем событие в events.
+    - Что делаем: пишем строку в events с типом и временем.
+    - Зачем: фиксируем факт (например PACKED_CONFIRMED), чтобы потом считать метрики
+      через COUNT/агрегации, а не вручную пересчитывать сессии.
+    - Как влияет на метрики: packed_count = COUNT(type='PACKED_CONFIRMED').
+    - Тестирование (curl):
+      1) POST /api/kiosk/session/finish {"status":"done"}
+      2) GET  /api/kiosk/report/shift?shift_id=...
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [ts, type, payload_json or "", shift_id, session_id, worker_id],
+    )
+    event_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(event_id or 0)
+
+
+def get_shift_report(shift_id: int) -> dict:
+    """
+    Минимальный отчёт по смене.
+    - Что делаем: считаем packed_count через events и суммируем времена из sessions.
+    - Зачем: нужен быстрый источник метрик для API /report.
+    - Как влияет на метрики: packed_count растёт по событиям PACKED_CONFIRMED.
+    - Тестирование (curl):
+      1) Запустить смену и упаковать комплект со status=done.
+      2) GET /api/kiosk/report/shift?shift_id=...
+    """
+    if not shift_id:
+        return {
+            "shift_id": 0,
+            "packed_count": 0,
+            "worktime_sec": 0,
+            "downtime_sec": 0,
+            "per_worker": {},
+        }
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute(
+        """SELECT COUNT(*) AS cnt
+           FROM events
+           WHERE shift_id=? AND type='PACKED_CONFIRMED'""",
+        [shift_id],
+    )
+    row = cur.fetchone()
+    packed_count = int(row["cnt"] if row else 0)
+
+    cur.execute(
+        """SELECT
+               COALESCE(SUM(worktime_sec), 0) AS worktime_sec,
+               COALESCE(SUM(downtime_sec), 0) AS downtime_sec
+           FROM sessions
+           WHERE shift_id=?""",
+        [shift_id],
+    )
+    totals = cur.fetchone()
+    worktime_sec = int((totals["worktime_sec"] if totals else 0) or 0)
+    downtime_sec = int((totals["downtime_sec"] if totals else 0) or 0)
+
+    cur.execute(
+        """SELECT worker_id,
+                  COALESCE(SUM(worktime_sec), 0) AS worktime_sec,
+                  COALESCE(SUM(downtime_sec), 0) AS downtime_sec
+           FROM sessions
+           WHERE shift_id=?
+           GROUP BY worker_id""",
+        [shift_id],
+    )
+    per_worker_rows = cur.fetchall() or []
+
+    cur.execute(
+        """SELECT worker_id, COUNT(*) AS cnt
+           FROM events
+           WHERE shift_id=? AND type='PACKED_CONFIRMED'
+           GROUP BY worker_id""",
+        [shift_id],
+    )
+    packed_per_worker_rows = cur.fetchall() or []
+
+    conn.close()
+
+    per_worker = {}
+    for row in per_worker_rows:
+        wid = row["worker_id"] or ""
+        per_worker[wid] = {
+            "packed_count": 0,
+            "worktime_sec": int(row["worktime_sec"] or 0),
+            "downtime_sec": int(row["downtime_sec"] or 0),
+        }
+
+    for row in packed_per_worker_rows:
+        wid = row["worker_id"] or ""
+        per_worker.setdefault(wid, {"packed_count": 0, "worktime_sec": 0, "downtime_sec": 0})
+        per_worker[wid]["packed_count"] = int(row["cnt"] or 0)
+
+    return {
+        "shift_id": int(shift_id),
+        "packed_count": packed_count,
+        "worktime_sec": worktime_sec,
+        "downtime_sec": downtime_sec,
+        "per_worker": per_worker,
+    }
