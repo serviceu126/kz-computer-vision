@@ -215,6 +215,14 @@ async def shift_add(payload: ShiftWorkerRequest):
     return {"status": "ok"}
 
 
+@app.post("/api/kiosk/shift/start")
+async def shift_start(payload: ShiftWorkerRequest):
+    # Новый API-метод для явного старта смены на РЦ.
+    # Возвращаем shift_id, чтобы фронт мог связать сессию упаковки со сменой.
+    shift_id = engine.add_worker_to_shift(worker_id=payload.worker_id, work_center=payload.work_center or "")
+    return {"status": "ok", "shift_id": shift_id}
+
+
 @app.post("/api/kiosk/shift/end")
 async def shift_end(payload: ShiftEndRequest):
     closed = engine.close_worker_shift(worker_id=payload.worker_id, work_centers=payload.work_centers)

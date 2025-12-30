@@ -25,9 +25,18 @@ def init_db():
         finish_time REAL,
         worktime_sec REAL,
         downtime_sec REAL,
-        status TEXT
+        status TEXT,
+        shift_id INTEGER
     )
     """)
+
+    # Миграция: добавляем shift_id в sessions, если его ещё нет.
+    # Это поле остаётся NULL для старых записей и случаев без активной смены,
+    # чтобы сохранить обратную совместимость и не ломать существующие данные.
+    cur.execute("PRAGMA table_info(sessions)")
+    session_columns = [row["name"] for row in (cur.fetchall() or [])]
+    if "shift_id" not in session_columns:
+        cur.execute("ALTER TABLE sessions ADD COLUMN shift_id INTEGER")
 
     # Учёт смен и рабочих центров (РЦ)
     # Один сотрудник может одновременно быть активен на нескольких РЦ.
@@ -55,11 +64,15 @@ def save_session(session):
     conn = get_conn()
     cur = conn.cursor()
 
+    # shift_id может быть не задан (нет активной смены или старая логика).
+    # Тогда сохраняем NULL, чтобы не ломать аналитику по историческим данным.
+    shift_id = getattr(session, "shift_id", None)
+
     cur.execute("""
     INSERT INTO sessions
     (worker_id, product_code, start_time, finish_time,
-     worktime_sec, downtime_sec, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+     worktime_sec, downtime_sec, status, shift_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, [
         session.worker_id,
         session.product_code,
@@ -67,40 +80,45 @@ def save_session(session):
         session.finish_time,
         session.worktime_sec,
         session.downtime_sec,
-        session.status
+        session.status,
+        shift_id,
     ])
 
     conn.commit()
     conn.close()
 
 
-def start_worker_shift(worker_id: str, work_center: str) -> None:
-    """Открывает смену сотрудника на указанном РЦ. Если уже открыта — ничего не делает."""
+def start_worker_shift(worker_id: str, work_center: str) -> int:
+    """Открывает смену сотрудника на указанном РЦ. Возвращает ID новой смены."""
     worker_id = (worker_id or "").strip()
     work_center = (work_center or "").strip().upper()
     if not worker_id or not work_center:
-        return
+        return 0
 
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        """SELECT id FROM worker_shifts
-           WHERE worker_id=? AND work_center=? AND is_active=1
-           LIMIT 1""",
-        [worker_id, work_center],
-    )
-    row = cur.fetchone()
-    if row:
-        conn.close()
-        return
+    now = time.time()
 
+    # Закрываем предыдущую активную смену на этом же РЦ (если была),
+    # чтобы не допустить несколько пересекающихся смен в одной зоне.
+    cur.execute(
+        """UPDATE worker_shifts
+           SET end_time=?, is_active=0
+           WHERE worker_id=? AND work_center=? AND is_active=1""",
+        [now, worker_id, work_center],
+    )
+
+    # Открываем новую смену и возвращаем её ID,
+    # чтобы можно было привязать к ней сессию упаковки.
     cur.execute(
         """INSERT INTO worker_shifts(worker_id, work_center, start_time, end_time, is_active)
            VALUES (?, ?, ?, NULL, 1)""",
-        [worker_id, work_center, time.time()],
+        [worker_id, work_center, now],
     )
+    shift_id = cur.lastrowid
     conn.commit()
     conn.close()
+    return int(shift_id or 0)
 
 
 def end_worker_shift(worker_id: str, work_centers: list[str] | None = None) -> int:
@@ -112,6 +130,8 @@ def end_worker_shift(worker_id: str, work_centers: list[str] | None = None) -> i
     cur = conn.cursor()
 
     now = time.time()
+    # Если передан список РЦ — закрываем только их,
+    # иначе закрываем все активные смены сотрудника.
     if work_centers:
         centers = [c.strip().upper() for c in work_centers if c and c.strip()]
         if not centers:
@@ -139,11 +159,11 @@ def end_worker_shift(worker_id: str, work_centers: list[str] | None = None) -> i
 
 
 def get_active_shifts() -> list[dict]:
-    """Список активных смен: [{worker_id, work_center, start_time}]."""
+    """Список активных смен: [{shift_id, worker_id, work_center, start_time}]."""
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        """SELECT worker_id, work_center, start_time
+        """SELECT id, worker_id, work_center, start_time
            FROM worker_shifts
            WHERE is_active=1
            ORDER BY start_time ASC"""
@@ -152,12 +172,34 @@ def get_active_shifts() -> list[dict]:
     conn.close()
     return [
         {
+            "shift_id": r["id"],
             "worker_id": r["worker_id"],
             "work_center": r["work_center"],
             "start_time": r["start_time"],
         }
         for r in rows
     ]
+
+
+def get_latest_active_shift_id(worker_id: str) -> int | None:
+    # Возвращаем ID самой свежей активной смены сотрудника,
+    # чтобы автоматически привязать новую упаковочную сессию к смене.
+    worker_id = (worker_id or "").strip()
+    if not worker_id:
+        return None
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id
+           FROM worker_shifts
+           WHERE worker_id=? AND is_active=1
+           ORDER BY start_time DESC, id DESC
+           LIMIT 1""",
+        [worker_id],
+    )
+    row = cur.fetchone()
+    conn.close()
+    return int(row["id"]) if row else None
 
 
 def get_worker_active_centers(worker_id: str) -> list[str]:
