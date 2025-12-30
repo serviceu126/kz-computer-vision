@@ -10,6 +10,7 @@ from core.storage import (
     start_worker_shift,
     end_worker_shift,
     get_active_shifts,
+    get_latest_active_shift_id,
     count_sessions_since,
 )
 from core.voice import say
@@ -160,18 +161,22 @@ class KioskEngine:
 
     # ─── смены/РЦ ───
 
-    def add_worker_to_shift(self, worker_id: str, work_center: str) -> None:
+    def add_worker_to_shift(self, worker_id: str, work_center: str) -> int:
         """Открывает смену сотрудника на выбранном РЦ (УПАКОВКА/УКОМПЛЕКТОВКА)."""
         wid = self._normalize_scan(worker_id)
         wc = (work_center or "").strip().upper()
         if not wid or not wc:
-            return
-        start_worker_shift(wid, wc)
+            return 0
+
+        # Запускаем смену и получаем её ID,
+        # чтобы при необходимости вернуть его в API.
+        shift_id = start_worker_shift(wid, wc)
         self._active_shifts_cache = get_active_shifts()
 
         # для верхней карточки показываем «текущего» сотрудника, если ещё не задан
         if getattr(self, "_current_worker_name", "—") in ("—", ""):
             self._current_worker_name = wid
+        return shift_id
 
     def close_worker_shift(self, worker_id: str, work_centers: Optional[list[str]] = None) -> int:
         wid = self._normalize_scan(worker_id)
@@ -218,6 +223,11 @@ class KioskEngine:
             return
 
 
+        # Пытаемся найти активную смену сотрудника.
+        # Это нужно, чтобы автоматически привязать упаковочную сессию к смене.
+        wid = self._normalize_scan(worker_id)
+        shift_id = get_latest_active_shift_id(wid) if wid else None
+
         info = get_bed_info(code)
         if info:
             bed_title = info.title
@@ -235,6 +245,9 @@ class KioskEngine:
                 start_time=time.time(),
                 status="running",
             )
+            # Сохраняем shift_id прямо в объекте сессии,
+            # чтобы при записи в БД сохранить привязку к смене.
+            self._session.shift_id = shift_id
             self._session_start_ts = self._session.start_time
 
             # простая голосовая подсказка
