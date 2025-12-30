@@ -41,6 +41,7 @@ class KioskState(BaseModel):
     worker_name: str
     shift_label: str
     worker_stats: Optional[str]
+    session_count_today: int
 
     # Смена/команда
     shift_active: bool = False
@@ -94,6 +95,13 @@ class ShiftWorkerRequest(BaseModel):
     work_center: Optional[str] = None  # УПАКОВКА / УКОМПЛЕКТОВКА
 
 
+class ShiftStartRequest(BaseModel):
+    # Явная схема для старта смены.
+    # Нужна, чтобы API возвращал shift_id (идентификатор открытой смены).
+    worker_id: str
+    work_center: str
+
+
 class ShiftEndRequest(BaseModel):
     worker_id: str
     work_centers: Optional[List[str]] = None  # если не задано — закрыть все
@@ -120,6 +128,7 @@ async def get_state():
         worker_name=ui.worker_name,
         shift_label=ui.shift_label,
         worker_stats=ui.worker_stats,
+        session_count_today=ui.session_count_today,
         shift_active=ui.shift_active,
         active_workers=ui.active_workers,
         bed_title=ui.bed_title,
@@ -211,6 +220,14 @@ async def finish_session(payload: FinishSessionRequest):
 async def shift_add(payload: ShiftWorkerRequest):
     engine.add_worker_to_shift(worker_id=payload.worker_id, work_center=payload.work_center or "")
     return {"status": "ok"}
+
+
+@app.post("/api/kiosk/shift/start")
+async def shift_start(payload: ShiftStartRequest):
+    # Новый эндпоинт старта смены.
+    # Возвращаем shift_id, чтобы фронт/интеграции могли связать события со сменой.
+    shift_id = engine.add_worker_to_shift(worker_id=payload.worker_id, work_center=payload.work_center)
+    return {"status": "ok", "shift_id": shift_id}
 
 
 @app.post("/api/kiosk/shift/end")

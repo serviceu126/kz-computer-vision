@@ -10,6 +10,8 @@ from core.storage import (
     start_worker_shift,
     end_worker_shift,
     get_active_shifts,
+    get_latest_active_shift_id,
+    count_sessions_since,
 )
 from core.voice import say
 from core.beds_catalog import get_bed_info
@@ -52,6 +54,7 @@ class KioskUIState:
     worker_name: str
     shift_label: str
     worker_stats: str
+    session_count_today: int
 
     # Смена/команда (для кнопок и модалки)
     shift_active: bool
@@ -135,6 +138,21 @@ class KioskEngine:
         s = s.replace("Ю", ".").replace("ю", ".").replace("Б", ",").replace("б", ",")
         return s
 
+    def _get_day_start_ts(self, now: float) -> float:
+        local_now = time.localtime(now)
+        day_start = time.struct_time((
+            local_now.tm_year,
+            local_now.tm_mon,
+            local_now.tm_mday,
+            0,
+            0,
+            0,
+            local_now.tm_wday,
+            local_now.tm_yday,
+            local_now.tm_isdst,
+        ))
+        return time.mktime(day_start)
+
     def set_worker(self, worker_id: str, worker_name: Optional[str], shift_label: Optional[str]) -> None:
         with self._lock:
             wid = self._normalize_scan(worker_id)
@@ -143,18 +161,21 @@ class KioskEngine:
 
     # ─── смены/РЦ ───
 
-    def add_worker_to_shift(self, worker_id: str, work_center: str) -> None:
+    def add_worker_to_shift(self, worker_id: str, work_center: str) -> int:
         """Открывает смену сотрудника на выбранном РЦ (УПАКОВКА/УКОМПЛЕКТОВКА)."""
         wid = self._normalize_scan(worker_id)
         wc = (work_center or "").strip().upper()
         if not wid or not wc:
-            return
-        start_worker_shift(wid, wc)
+            return 0
+        # ВАЖНО: start_worker_shift возвращает shift_id.
+        # Это нужно для API /api/kiosk/shift/start, чтобы отдать идентификатор смены.
+        shift_id = start_worker_shift(wid, wc)
         self._active_shifts_cache = get_active_shifts()
 
         # для верхней карточки показываем «текущего» сотрудника, если ещё не задан
         if getattr(self, "_current_worker_name", "—") in ("—", ""):
             self._current_worker_name = wid
+        return shift_id
 
     def close_worker_shift(self, worker_id: str, work_centers: Optional[list[str]] = None) -> int:
         wid = self._normalize_scan(worker_id)
@@ -211,6 +232,9 @@ class KioskEngine:
                 bed_title = "Кровать " + code
             if not bed_details:
                 bed_details = "Размер — | Цвет — | Вид —"
+        # ВАЖНО: смена может быть не открыта.
+        # В этом случае shift_id будет None, и это допустимо для таблицы sessions.
+        shift_id = get_latest_active_shift_id(worker_id)
         with self._lock:
             self._session = PackSession(
                 worker_id=worker_id,
@@ -218,6 +242,10 @@ class KioskEngine:
                 start_time=time.time(),
                 status="running",
             )
+            # Привязываем сессию к активной смене (если она есть).
+            # Мы не добавляем поле в PackSession, а используем динамический атрибут,
+            # чтобы не менять отдельный файл core/session.py.
+            self._session.shift_id = shift_id
             self._session_start_ts = self._session.start_time
 
             # простая голосовая подсказка
@@ -400,6 +428,8 @@ class KioskEngine:
     def get_ui_state(self) -> KioskUIState:
         with self._lock:
             now = time.time()
+            today_start = self._get_day_start_ts(now)
+            session_count_today = count_sessions_since(today_start)
 
             # актуализируем список активных смен для UI
             try:
@@ -415,7 +445,8 @@ class KioskEngine:
                 return KioskUIState(
                     worker_name=getattr(self, "_current_worker_name", "—"),
                     shift_label=getattr(self, "_current_shift_label", "Смена не выбрана"),
-                    worker_stats="Сегодня: 0 кроватей, простоев 0 мин",
+                    worker_stats=f"Сегодня: {session_count_today} кроватей, простоев 0 мин",
+                    session_count_today=session_count_today,
                     shift_active=shift_active,
                     active_workers=self._active_shifts_cache,
                     bed_title=getattr(self, "_current_bed_title", "Кровать не выбрана"),
@@ -477,7 +508,8 @@ class KioskEngine:
                 return KioskUIState(
                     worker_name=getattr(self, "_current_worker_name", "—"),
                     shift_label=getattr(self, "_current_shift_label", "Смена не выбрана"),
-                    worker_stats="Сегодня: 0 кроватей, простоев 0 мин",
+                    worker_stats=f"Сегодня: {session_count_today} кроватей, простоев 0 мин",
+                    session_count_today=session_count_today,
                     shift_active=shift_active,
                     active_workers=self._active_shifts_cache,
                     bed_title=getattr(self, "_current_bed_title", "Кровать не выбрана"),
@@ -520,7 +552,8 @@ class KioskEngine:
             return KioskUIState(
                 worker_name=getattr(self, "_current_worker_name", "—"),
                 shift_label=getattr(self, "_current_shift_label", "Смена не выбрана"),
-                worker_stats=f"Сегодня: 0 кроватей, простоев {idle_sec // 60} мин",
+                worker_stats=f"Сегодня: {session_count_today} кроватей, простоев {idle_sec // 60} мин",
+                session_count_today=session_count_today,
                 shift_active=shift_active,
                 active_workers=self._active_shifts_cache,
                 bed_title=getattr(self, "_current_bed_title", "Кровать не выбрана"),
