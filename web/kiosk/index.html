@@ -527,6 +527,72 @@
       box-shadow: 0 0 6px var(--accent);
     }
 
+    .action-pill.disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      filter: grayscale(0.2);
+      box-shadow: none;
+    }
+
+    .action-pill.disabled .dot {
+      background: rgba(148, 163, 184, 0.6);
+      box-shadow: none;
+    }
+
+    .pack-card {
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .pack-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .pack-meta {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .pack-steps-preview {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 14px;
+    }
+
+    .pack-step-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 6px 10px;
+      border-radius: 12px;
+      border: 1px solid var(--border-soft);
+      background: rgba(2, 6, 23, 0.55);
+    }
+
+    .pack-step-line.current {
+      border-color: rgba(56, 189, 248, 0.8);
+      background: rgba(8, 47, 73, 0.55);
+      color: #e0f2fe;
+    }
+
+    .pack-toast {
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(239, 68, 68, 0.6);
+      background: rgba(127, 29, 29, 0.4);
+      color: #fecaca;
+      font-size: 14px;
+      display: none;
+    }
+
     /* Модальные окна (в стиле интерфейса) */
     .modal-backdrop {
       position: fixed;
@@ -545,7 +611,7 @@
     }
 
     .modal {
-      width: min(1100px, 96vw);
+      width: min(1200px, 96vw);
       border-radius: var(--radius);
       border: 1px solid var(--border-soft);
       background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.92));
@@ -821,6 +887,62 @@
         </div>
       </div>
 
+      <div class="card pack-card">
+        <div class="card-title">Упаковка</div>
+        <div class="pack-row">
+          <div>
+            <div class="card-main" style="gap:10px;">
+              <span id="packStateLabel">Состояние: —</span>
+              <span class="badge">
+                <span class="dot"></span>
+                <span id="packPhaseLabel">Фаза: —</span>
+              </span>
+            </div>
+            <div class="pack-meta" id="packStepSummary">Шаг — из —</div>
+            <div class="pack-meta" id="packCurrentStep">Текущий шаг: —</div>
+            <div class="pack-meta" id="packFlags">Доступно: —</div>
+          </div>
+        </div>
+
+        <div class="action-row" style="justify-content:flex-start;">
+          <div id="btnPackStart" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Start SKU</span>
+          </div>
+          <div id="btnPackStepComplete" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Step complete</span>
+          </div>
+          <div id="btnPackPhaseNext" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Next phase</span>
+          </div>
+          <div id="btnPackCloseBox" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Close box</span>
+          </div>
+          <div id="btnPackPrintLabel" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Print label</span>
+          </div>
+          <div id="btnPackTableEmpty" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Table empty</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-title" style="margin-bottom:6px;">Ближайшие шаги</div>
+          <div class="pack-steps-preview" id="packPlanPreview">
+            <div class="pack-step-line">
+              <span>—</span>
+              <span>—</span>
+            </div>
+          </div>
+          <div class="pack-toast" id="packToast"></div>
+        </div>
+      </div>
+
       <div class="card steps-card" style="flex:1; min-height:0;">
         <div>
           <div class="card-title">Прогресс комплекта</div>
@@ -898,13 +1020,51 @@
   </div>
 </div>
 
+<!-- Модалка старта упаковки по SKU -->
+<div id="packModalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div>
+        <div class="modal-title">Старт упаковки</div>
+        <div class="modal-sub">Введите или отсканируйте SKU для запуска упаковки.</div>
+      </div>
+      <div class="modal-scan">
+        <div style="flex:1;">
+          SKU: <input id="packModalSku" type="text" placeholder="Например, SKU-1"
+                      style="width:100%; background:transparent; border:none; color:#e0f2fe; font-size:15px;">
+        </div>
+        <div id="packModalHint" style="font-size:13px; color: var(--text-muted);">Ожидание ввода…</div>
+      </div>
+      <div class="modal-actions" id="packModalActions"></div>
+      <div class="modal-footer">
+        <div id="packModalCancel" class="action-pill modal-cancel-pill" role="button" tabindex="0">
+          <span class="dot"></span>
+          <span>ОТМЕНА</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   const API_STATE_URL = "/api/kiosk/state";
+  const API_PACK_UI_STATE_URL = "/api/kiosk/pack/ui-state";
+  const API_PACK_STEPS_STATE_URL = "/api/kiosk/pack/steps/state";
+  const API_PACK_PLAN_URL = "/api/kiosk/pack/plan";
 
   let lastState = null;
   let timerStart = null;
   let workBase = 0;
   let idleBase = 0;
+  let packUiState = null;
+  let packStepsState = null;
+  let packPlan = [];
+  let btnPackStart = null;
+  let btnPackStepComplete = null;
+  let btnPackPhaseNext = null;
+  let btnPackCloseBox = null;
+  let btnPackPrintLabel = null;
+  let btnPackTableEmpty = null;
 
   function pad(n) { return n.toString().padStart(2, "0"); }
 
@@ -1201,9 +1361,184 @@ document.getElementById("bedDetails").textContent =
     }
   }
 
+  // ───────── Упаковка: отдельный набор запросов ─────────
+  // Мы намеренно разделяем запросы:
+  // 1) ui-state даёт текущее состояние и can_* флаги (UI не решает правила сам).
+  // 2) steps/state даёт фазу и текущий шаг.
+  // 3) plan даёт список шагов для показа оператору.
+  // Это делает код понятным и безопасным: UI лишь отображает то, что решил backend.
+  async function fetchPackUiState() {
+    try {
+      const resp = await fetch(API_PACK_UI_STATE_URL, { cache: "no-store" });
+      if (!resp.ok) {
+        packUiState = null;
+        renderPackUiState();
+        return;
+      }
+      packUiState = await resp.json();
+      renderPackUiState();
+    } catch (e) {
+      console.warn("Ошибка получения состояния упаковки:", e);
+    }
+  }
+
+  async function fetchPackStepsState() {
+    try {
+      const resp = await fetch(API_PACK_STEPS_STATE_URL, { cache: "no-store" });
+      if (!resp.ok) {
+        packStepsState = null;
+        renderPackStepsState();
+        renderPackPlanPreview();
+        return;
+      }
+      packStepsState = await resp.json();
+      renderPackStepsState();
+    } catch (e) {
+      console.warn("Ошибка получения состояния шагов:", e);
+    }
+  }
+
+  async function fetchPackPlan() {
+    try {
+      const resp = await fetch(API_PACK_PLAN_URL, { cache: "no-store" });
+      if (!resp.ok) {
+        packPlan = [];
+        renderPackPlanPreview();
+        return;
+      }
+      const data = await resp.json();
+      packPlan = data.steps || [];
+      renderPackPlanPreview();
+    } catch (e) {
+      console.warn("Ошибка получения плана упаковки:", e);
+    }
+  }
+
+  function renderPackUiState() {
+    // Показываем оператору состояние упаковки и переводим can_* флаги в доступность кнопок.
+    // Важно: правила переходов не дублируются в UI, мы только доверяем backend.
+    const label = document.getElementById("packStateLabel");
+    const phaseLabel = document.getElementById("packPhaseLabel");
+    const flagsLabel = document.getElementById("packFlags");
+    if (!label || !phaseLabel) return;
+
+    const active = packUiState && packUiState.active_session;
+    const state = packUiState && packUiState.pack_state;
+    label.textContent = "Состояние: " + (state || "—");
+    phaseLabel.textContent = "Фаза: " + (active && active.phase ? active.phase : "—");
+
+    const canStart = packUiState && packUiState.can_start_sku;
+    const canClose = packUiState && packUiState.can_close_box;
+    const canPrint = packUiState && packUiState.can_print_label;
+    const canTableEmpty = packUiState && packUiState.can_mark_table_empty;
+
+    if (flagsLabel) {
+      const flagText = [
+        `Start SKU: ${canStart ? "да" : "нет"}`,
+        `Close box: ${canClose ? "да" : "нет"}`,
+        `Print label: ${canPrint ? "да" : "нет"}`,
+        `Table empty: ${canTableEmpty ? "да" : "нет"}`,
+      ];
+      flagsLabel.textContent = "Доступно: " + flagText.join(" • ");
+    }
+
+    setActionPillDisabled(btnPackStart, !canStart);
+    setActionPillDisabled(btnPackCloseBox, !canClose);
+    setActionPillDisabled(btnPackPrintLabel, !canPrint);
+    setActionPillDisabled(btnPackTableEmpty, !canTableEmpty);
+
+    const hasSession = !!active;
+    setActionPillDisabled(btnPackStepComplete, !hasSession);
+    setActionPillDisabled(btnPackPhaseNext, !hasSession);
+  }
+
+  function renderPackStepsState() {
+    // Сводка шага и текущая операция берутся из backend, чтобы UI не ошибся с логикой.
+    const summary = document.getElementById("packStepSummary");
+    const currentStep = document.getElementById("packCurrentStep");
+    if (!summary || !currentStep) return;
+
+    if (!packStepsState || !packStepsState.phase) {
+      summary.textContent = "Шаг — из —";
+      currentStep.textContent = "Текущий шаг: —";
+      return;
+    }
+
+    summary.textContent =
+      "Шаг " + (packStepsState.current_step_index + 1) +
+      " из " + (packStepsState.total_steps || 0);
+
+    const step = packStepsState.current_step;
+    if (!step) {
+      currentStep.textContent = "Текущий шаг: —";
+      return;
+    }
+    currentStep.textContent =
+      "Текущий шаг: " + step.slot + " / " + step.part_code;
+  }
+
+  function renderPackPlanPreview() {
+    // Показываем 3–5 ближайших шагов, чтобы оператор видел "что дальше".
+    // План не меняем локально, просто читаем его из backend и подсвечиваем текущий шаг.
+    const list = document.getElementById("packPlanPreview");
+    if (!list) return;
+    list.innerHTML = "";
+
+    const stepsState = packStepsState || {};
+    const currentIndex = stepsState.current_step_index || 0;
+    const phase = stepsState.phase;
+
+    if (!packPlan.length || !phase) {
+      const empty = document.createElement("div");
+      empty.className = "pack-step-line";
+      empty.innerHTML = "<span>План не загружен</span><span>—</span>";
+      list.appendChild(empty);
+      return;
+    }
+
+    const phaseSteps = packPlan.filter(step => step.phase === phase);
+    const preview = phaseSteps.slice(currentIndex, currentIndex + 5);
+    preview.forEach((step, idx) => {
+      const row = document.createElement("div");
+      row.className = "pack-step-line";
+      if (idx === 0) row.classList.add("current");
+      row.innerHTML = `<span>${step.slot}</span><span>${step.part_code}</span>`;
+      list.appendChild(row);
+    });
+  }
+
+  async function handlePackAction(url, body) {
+    // Унифицированный вызов упаковочных действий.
+    // Если backend вернул 409/400, показываем понятный текст оператору.
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : null,
+      });
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({}));
+        showPackToast(detail.detail || "Не удалось выполнить действие.");
+        return;
+      }
+      await refreshPackData();
+    } catch (e) {
+      showPackToast("Ошибка сети: действие не выполнено.");
+    }
+  }
+
+  async function refreshPackData() {
+    // После каждого действия пересчитываем UI: состояния, шаги и план.
+    await fetchPackUiState();
+    await fetchPackStepsState();
+    await fetchPackPlan();
+  }
+
   setInterval(fetchState, 1500);
+  setInterval(refreshPackData, 2000);
   setInterval(tickTimers, 1000);
   fetchState();
+  refreshPackData();
 
   // ───────── Сканер, смены и рабочие центры ─────────
 
@@ -1223,10 +1558,19 @@ document.getElementById("bedDetails").textContent =
   const modalHintEl = document.getElementById("shiftModalHint");
   const modalActionsEl = document.getElementById("shiftModalActions");
 
+  // Модалка упаковки: отдельный ввод SKU, чтобы оператор видел явный старт.
+  const packModalBackdrop = document.getElementById("packModalBackdrop");
+  const packModalSku = document.getElementById("packModalSku");
+  const packModalHint = document.getElementById("packModalHint");
+  const packModalCancel = document.getElementById("packModalCancel");
+  const packModalActions = document.getElementById("packModalActions");
+
   let modalOpen = false;
   let modalMode = "add"; // "add" | "end"
   let modalWorkerId = null;
   let initialShiftModalShown = false;
+
+  let packModalOpen = false;
 
   // формат QR кровати:
 
@@ -1262,6 +1606,22 @@ document.getElementById("bedDetails").textContent =
     el.classList.toggle("active", !!active);
   }
 
+  function setActionPillDisabled(el, disabled) {
+    if (!el) return;
+    el.classList.toggle("disabled", !!disabled);
+    el.setAttribute("aria-disabled", disabled ? "true" : "false");
+  }
+
+  function showPackToast(message) {
+    const toast = document.getElementById("packToast");
+    if (!toast) return;
+    toast.textContent = message;
+    toast.style.display = "block";
+    setTimeout(() => {
+      toast.style.display = "none";
+    }, 4000);
+  }
+
   function openShiftModal(mode) {
     modalMode = mode || "add";
     modalWorkerId = null;
@@ -1287,6 +1647,40 @@ document.getElementById("bedDetails").textContent =
     modalBackdrop.classList.remove("open");
     modalBackdrop.setAttribute("aria-hidden", "true");
     modalWorkerId = null;
+  }
+
+  function openPackModal() {
+    /**
+     * Модалка старта упаковки.
+     *
+     * Зачем:
+     * - оператор явно вводит SKU и видит подтверждение;
+     * - мы не пытаемся "угадывать" SKU в UI, только отправляем его в backend.
+     */
+    packModalOpen = true;
+    packModalBackdrop.classList.add("open");
+    packModalBackdrop.setAttribute("aria-hidden", "false");
+    packModalHint.textContent = "Ожидание ввода…";
+    packModalSku.value = "";
+    packModalActions.innerHTML = "";
+
+    const btnStart = mkModalBtn("Запустить упаковку", "success", async () => {
+      const sku = (packModalSku.value || "").trim();
+      if (!sku) {
+        packModalHint.textContent = "Введите SKU перед стартом.";
+        return;
+      }
+      await handlePackAction("/api/kiosk/pack/start", { sku });
+      closePackModal();
+    });
+    packModalActions.appendChild(btnStart);
+    packModalSku.focus();
+  }
+
+  function closePackModal() {
+    packModalOpen = false;
+    packModalBackdrop.classList.remove("open");
+    packModalBackdrop.setAttribute("aria-hidden", "true");
   }
 
 function mkModalBtn(text, kind, onClick) {
@@ -1408,6 +1802,53 @@ function mkModalBtn(text, kind, onClick) {
   }
   if (modalCancelEl) {
     modalCancelEl.addEventListener("click", () => closeShiftModal());
+  }
+  if (packModalCancel) {
+    packModalCancel.addEventListener("click", () => closePackModal());
+  }
+
+  btnPackStart = document.getElementById("btnPackStart");
+  btnPackStepComplete = document.getElementById("btnPackStepComplete");
+  btnPackPhaseNext = document.getElementById("btnPackPhaseNext");
+  btnPackCloseBox = document.getElementById("btnPackCloseBox");
+  btnPackPrintLabel = document.getElementById("btnPackPrintLabel");
+  btnPackTableEmpty = document.getElementById("btnPackTableEmpty");
+
+  if (btnPackStart) {
+    btnPackStart.addEventListener("click", () => {
+      if (btnPackStart.classList.contains("disabled")) return;
+      openPackModal();
+    });
+  }
+  if (btnPackStepComplete) {
+    btnPackStepComplete.addEventListener("click", () => {
+      if (btnPackStepComplete.classList.contains("disabled")) return;
+      handlePackAction("/api/kiosk/pack/step/complete");
+    });
+  }
+  if (btnPackPhaseNext) {
+    btnPackPhaseNext.addEventListener("click", () => {
+      if (btnPackPhaseNext.classList.contains("disabled")) return;
+      handlePackAction("/api/kiosk/pack/phase/next");
+    });
+  }
+  if (btnPackCloseBox) {
+    btnPackCloseBox.addEventListener("click", () => {
+      if (btnPackCloseBox.classList.contains("disabled")) return;
+      handlePackAction("/api/kiosk/pack/close-box");
+    });
+  }
+  if (btnPackPrintLabel) {
+    btnPackPrintLabel.addEventListener("click", () => {
+      if (btnPackPrintLabel.classList.contains("disabled")) return;
+      handlePackAction("/api/kiosk/pack/print-label");
+    });
+  }
+  if (btnPackTableEmpty) {
+    btnPackTableEmpty.addEventListener("click", () => {
+      if (btnPackTableEmpty.classList.contains("disabled")) return;
+      handlePackAction("/api/kiosk/pack/table-empty");
+    });
   }
 
   // helper для отладочной подписи внизу
@@ -1547,6 +1988,9 @@ function mkModalBtn(text, kind, onClick) {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && modalOpen) {
       closeShiftModal();
+    }
+    if (e.key === "Escape" && packModalOpen) {
+      closePackModal();
     }
   });
 </script>
