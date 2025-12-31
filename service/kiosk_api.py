@@ -13,6 +13,7 @@ from services.packaging import (
     apply_event,
     compute_pack_ui_flags,
     get_active_session as get_pack_active_session,
+    get_latest_session as get_pack_latest_session,
     get_state as get_pack_state,
     start_session as start_pack_session,
     EVENT_CLOSE_BOX,
@@ -384,10 +385,11 @@ async def pack_state():
 @app.get("/api/kiosk/pack/ui-state")
 async def pack_ui_state():
     active_session = get_pack_active_session()
-    flags = compute_pack_ui_flags(active_session)
+    session_for_flags = active_session or get_pack_latest_session()
+    flags = compute_pack_ui_flags(session_for_flags)
     return {
         "active_session": active_session,
-        "pack_state": active_session["state"] if active_session else None,
+        "pack_state": session_for_flags["state"] if session_for_flags else None,
         **flags,
     }
 

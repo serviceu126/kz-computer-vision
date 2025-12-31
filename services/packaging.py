@@ -76,6 +76,21 @@ def get_active_session() -> dict | None:
     }
 
 
+def get_latest_session() -> dict | None:
+    latest = storage.get_latest_pack_session()
+    if not latest:
+        return None
+    return {
+        "id": int(latest["id"]),
+        "shift_id": latest["shift_id"],
+        "worker_id": latest["worker_id"],
+        "sku": latest["sku"],
+        "state": latest["state"],
+        "start_time": latest["start_time"],
+        "end_time": latest["end_time"],
+    }
+
+
 def start_session(sku: str) -> dict:
     sku = (sku or "").strip()
     if not sku:
@@ -85,6 +100,12 @@ def start_session(sku: str) -> dict:
     if active:
         raise PackagingTransitionError(
             "Нельзя начать новый SKU: завершите текущую упаковку или зафиксируйте TABLE_EMPTY."
+        )
+
+    latest = storage.get_latest_pack_session()
+    if latest and latest["state"] != STATE_TABLE_EMPTY:
+        raise PackagingTransitionError(
+            "Стол должен быть пустым перед стартом следующего SKU."
         )
 
     now = time.time()

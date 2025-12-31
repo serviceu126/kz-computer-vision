@@ -68,3 +68,37 @@ def test_packaging_ui_state_flags(tmp_path, monkeypatch):
     res_closed = client.get("/api/kiosk/pack/ui-state")
     payload_closed = res_closed.json()
     assert payload_closed["can_print_label"] is True
+
+    client.post("/api/kiosk/pack/print-label")
+    res_labeled = client.get("/api/kiosk/pack/ui-state")
+    payload_labeled = res_labeled.json()
+    assert payload_labeled["can_start_sku"] is False
+    assert payload_labeled["can_mark_table_empty"] is True
+
+    client.post("/api/kiosk/pack/table-empty")
+    res_empty = client.get("/api/kiosk/pack/ui-state")
+    payload_empty = res_empty.json()
+    assert payload_empty["can_start_sku"] is True
+
+
+def test_packaging_table_empty_gate_for_next_sku(tmp_path, monkeypatch):
+    _setup_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    res_start = client.post("/api/kiosk/pack/start", json={"sku": "SKU-6"})
+    assert res_start.status_code == 200
+
+    res_close = client.post("/api/kiosk/pack/close-box")
+    assert res_close.status_code == 200
+
+    res_print = client.post("/api/kiosk/pack/print-label")
+    assert res_print.status_code == 200
+
+    res_start_next = client.post("/api/kiosk/pack/start", json={"sku": "SKU-7"})
+    assert res_start_next.status_code == 409
+
+    res_table_empty = client.post("/api/kiosk/pack/table-empty")
+    assert res_table_empty.status_code == 200
+
+    res_start_ok = client.post("/api/kiosk/pack/start", json={"sku": "SKU-7"})
+    assert res_start_ok.status_code == 200
