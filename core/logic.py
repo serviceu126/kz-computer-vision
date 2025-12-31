@@ -12,7 +12,10 @@ from core.storage import (
     get_active_shifts,
     get_latest_active_shift_id,
     count_sessions_since,
+<<<<<<< HEAD
+=======
     add_event,
+>>>>>>> main
 )
 from core.voice import say
 from core.beds_catalog import get_bed_info
@@ -168,9 +171,14 @@ class KioskEngine:
         wc = (work_center or "").strip().upper()
         if not wid or not wc:
             return 0
+<<<<<<< HEAD
+        # ВАЖНО: start_worker_shift возвращает shift_id.
+        # Это нужно для API /api/kiosk/shift/start, чтобы отдать идентификатор смены.
+=======
 
         # Запускаем смену и получаем её ID,
         # чтобы при необходимости вернуть его в API.
+>>>>>>> main
         shift_id = start_worker_shift(wid, wc)
         self._active_shifts_cache = get_active_shifts()
 
@@ -239,6 +247,9 @@ class KioskEngine:
                 bed_title = "Кровать " + code
             if not bed_details:
                 bed_details = "Размер — | Цвет — | Вид —"
+        # ВАЖНО: смена может быть не открыта.
+        # В этом случае shift_id будет None, и это допустимо для таблицы sessions.
+        shift_id = get_latest_active_shift_id(worker_id)
         with self._lock:
             self._session = PackSession(
                 worker_id=worker_id,
@@ -246,8 +257,14 @@ class KioskEngine:
                 start_time=time.time(),
                 status="running",
             )
+<<<<<<< HEAD
+            # Привязываем сессию к активной смене (если она есть).
+            # Мы не добавляем поле в PackSession, а используем динамический атрибут,
+            # чтобы не менять отдельный файл core/session.py.
+=======
             # Сохраняем shift_id прямо в объекте сессии,
             # чтобы при записи в БД сохранить привязку к смене.
+>>>>>>> main
             self._session.shift_id = shift_id
             self._session_start_ts = self._session.start_time
 
