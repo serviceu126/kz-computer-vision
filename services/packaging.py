@@ -50,6 +50,32 @@ def get_state() -> dict:
     return {"session_id": None, "sku": None, "state": None}
 
 
+def compute_pack_ui_flags(session: dict | None) -> dict:
+    state = session["state"] if session else None
+    allowed = _ALLOWED_TRANSITIONS.get(state, set())
+    return {
+        "can_start_sku": EVENT_START in allowed,
+        "can_mark_table_empty": EVENT_TABLE_EMPTY in allowed,
+        "can_close_box": EVENT_CLOSE_BOX in allowed,
+        "can_print_label": EVENT_PRINT_LABEL in allowed,
+    }
+
+
+def get_active_session() -> dict | None:
+    active = storage.get_active_pack_session()
+    if not active:
+        return None
+    return {
+        "id": int(active["id"]),
+        "shift_id": active["shift_id"],
+        "worker_id": active["worker_id"],
+        "sku": active["sku"],
+        "state": active["state"],
+        "start_time": active["start_time"],
+        "end_time": active["end_time"],
+    }
+
+
 def start_session(sku: str) -> dict:
     sku = (sku or "").strip()
     if not sku:

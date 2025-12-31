@@ -89,9 +89,18 @@ def init_db():
         sku TEXT NOT NULL,
         start_time REAL NOT NULL,
         end_time REAL,
-        state TEXT NOT NULL
+        state TEXT NOT NULL,
+        shift_id INTEGER,
+        worker_id TEXT
     )
     """)
+
+    cur.execute("PRAGMA table_info(pack_sessions)")
+    pack_columns = [row["name"] for row in cur.fetchall()]
+    if "shift_id" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN shift_id INTEGER")
+    if "worker_id" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN worker_id TEXT")
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS pack_events (
@@ -174,13 +183,19 @@ def add_event(
     return int(event_id or 0)
 
 
-def create_pack_session(sku: str, ts: float, state: str) -> int:
+def create_pack_session(
+    sku: str,
+    ts: float,
+    state: str,
+    shift_id: int | None = None,
+    worker_id: str | None = None,
+) -> int:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        """INSERT INTO pack_sessions(sku, start_time, end_time, state)
-           VALUES (?, ?, NULL, ?)""",
-        [sku, ts, state],
+        """INSERT INTO pack_sessions(sku, start_time, end_time, state, shift_id, worker_id)
+           VALUES (?, ?, NULL, ?, ?, ?)""",
+        [sku, ts, state, shift_id, worker_id],
     )
     session_id = cur.lastrowid
     conn.commit()

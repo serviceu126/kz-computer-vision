@@ -44,3 +44,27 @@ def test_packaging_start_before_table_empty_forbidden(tmp_path, monkeypatch):
 
     res_start_again = client.post("/api/kiosk/pack/start", json={"sku": "SKU-4"})
     assert res_start_again.status_code == 409
+
+
+def test_packaging_ui_state_flags(tmp_path, monkeypatch):
+    _setup_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    res_idle = client.get("/api/kiosk/pack/ui-state")
+    assert res_idle.status_code == 200
+    payload_idle = res_idle.json()
+    assert payload_idle["active_session"] is None
+    assert payload_idle["can_start_sku"] is True
+    assert payload_idle["can_close_box"] is False
+    assert payload_idle["can_print_label"] is False
+    assert payload_idle["can_mark_table_empty"] is False
+
+    client.post("/api/kiosk/pack/start", json={"sku": "SKU-5"})
+    res_started = client.get("/api/kiosk/pack/ui-state")
+    payload_started = res_started.json()
+    assert payload_started["can_start_sku"] is False
+
+    client.post("/api/kiosk/pack/close-box")
+    res_closed = client.get("/api/kiosk/pack/ui-state")
+    payload_closed = res_closed.json()
+    assert payload_closed["can_print_label"] is True
