@@ -568,6 +568,12 @@
       font-weight: 700;
     }
 
+    .pack-hint {
+      margin-top: 6px;
+      font-size: 16px;
+      color: var(--text-main);
+    }
+
     .pack-state-chip {
       display: inline-flex;
       align-items: center;
@@ -621,6 +627,29 @@
       padding: 8px 10px;
       font-size: 12px;
       color: var(--text-muted);
+    }
+
+    .manual-controls {
+      display: none;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .manual-controls.open {
+      display: flex;
+    }
+
+    /* ВАЖНО: упаковка должна быть визуально важнее прогресса.
+       Мы делаем блок "Упаковка" выше и крупнее,
+       а "Прогресс комплекта" — менее доминирующим, чтобы не отвлекать. */
+    .pack-card {
+      flex: 1.4;
+    }
+
+    /* Прогресс показываем компактно: оператору важнее текущее действие,
+       а детальная статистика — вторична. */
+    .steps-card {
+      flex: 0.6;
     }
 
     .pack-steps-preview {
@@ -960,6 +989,7 @@
             <span id="packPhaseLabel">Фаза: —</span>
           </div>
         </div>
+        <div class="pack-hint" id="packHint">Сканируйте QR-код кровати (SKU) для старта.</div>
 
         <div class="pack-current-step">
           <div class="pack-current-step-title">Текущий шаг</div>
@@ -976,6 +1006,13 @@
         </div>
 
         <div class="action-row" style="justify-content:flex-start;">
+          <div id="btnManualToggle" class="action-pill manual-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Ручной режим (супервайзер)</span>
+          </div>
+        </div>
+
+        <div class="action-row manual-controls" id="manualControls">
           <div id="btnPackStart" class="action-pill manual-pill" role="button" tabindex="0">
             <span class="dot"></span>
             <span>Старт SKU (ручной режим)</span>
@@ -1014,7 +1051,23 @@
         </div>
       </div>
 
-      <div class="card steps-card" style="flex:1; min-height:0;">
+      <div class="card" id="shiftPlanCard">
+        <div class="card-title">Сменное задание</div>
+        <div class="pack-meta" id="shiftPlanName">План не выбран</div>
+        <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
+        <div class="action-row" style="justify-content:flex-start;">
+          <div id="btnShiftPlanUpload" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Загрузить список</span>
+          </div>
+          <div id="btnShiftPlanSelect" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Выбрать из списка</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card steps-card" style="min-height:0;">
         <div>
           <div class="card-title">Прогресс комплекта</div>
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -1117,11 +1170,58 @@
   </div>
 </div>
 
+<!-- Модалка загрузки сменного задания -->
+<div id="shiftPlanUploadBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div>
+        <div class="modal-title">Загрузка сменного задания</div>
+        <div class="modal-sub">Вставьте список SKU построчно и нажмите «Загрузить».</div>
+      </div>
+      <div class="modal-scan" style="flex-direction:column; align-items:stretch;">
+        <input id="shiftPlanNameInput" type="text" placeholder="Название плана (например, Смена А)"
+               style="background:transparent; border:none; color:#e0f2fe; font-size:15px;">
+        <textarea id="shiftPlanTextarea" rows="6" placeholder="SKU по одному на строке"
+                  style="width:100%; background:transparent; border:none; color:#e0f2fe; font-size:14px; resize:vertical;"></textarea>
+        <div id="shiftPlanUploadHint" style="font-size:13px; color: var(--text-muted);">Ожидание ввода…</div>
+      </div>
+      <div class="modal-actions" id="shiftPlanUploadActions"></div>
+      <div class="modal-footer">
+        <div id="shiftPlanUploadCancel" class="action-pill modal-cancel-pill" role="button" tabindex="0">
+          <span class="dot"></span>
+          <span>ОТМЕНА</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модалка выбора сменного задания -->
+<div id="shiftPlanSelectBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div>
+        <div class="modal-title">Выбор сменного задания</div>
+        <div class="modal-sub">Выберите один из ранее загруженных списков SKU.</div>
+      </div>
+      <div class="modal-actions" id="shiftPlanSelectActions"></div>
+      <div class="modal-footer">
+        <div id="shiftPlanSelectCancel" class="action-pill modal-cancel-pill" role="button" tabindex="0">
+          <span class="dot"></span>
+          <span>ОТМЕНА</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   const API_STATE_URL = "/api/kiosk/state";
   const API_PACK_UI_STATE_URL = "/api/kiosk/pack/ui-state";
   const API_PACK_STEPS_STATE_URL = "/api/kiosk/pack/steps/state";
-  const API_PACK_PLAN_URL = "/api/kiosk/pack/plan";
+  const API_SHIFT_PLAN_UPLOAD_URL = "/api/kiosk/pack/plan/upload";
+  const API_SHIFT_PLAN_LIST_URL = "/api/kiosk/pack/plan/list";
+  const API_SHIFT_PLAN_SELECT_URL = "/api/kiosk/pack/plan/select";
 
   let lastState = null;
   let timerStart = null;
@@ -1129,7 +1229,8 @@
   let idleBase = 0;
   let packUiState = null;
   let packStepsState = null;
-  let packPlan = [];
+  let shiftPlanSelected = null;
+  let shiftPlanList = [];
   let btnPackStart = null;
   let btnPackStepComplete = null;
   let btnPackPhaseNext = null;
@@ -1469,19 +1570,23 @@ document.getElementById("bedDetails").textContent =
     }
   }
 
-  async function fetchPackPlan() {
+  async function fetchShiftPlanList() {
     try {
-      const resp = await fetch(API_PACK_PLAN_URL, { cache: "no-store" });
+      const resp = await fetch(API_SHIFT_PLAN_LIST_URL, { cache: "no-store" });
       if (!resp.ok) {
-        packPlan = [];
+        shiftPlanList = [];
+        shiftPlanSelected = null;
+        renderShiftPlanPanel();
         renderPackPlanPreview();
         return;
       }
       const data = await resp.json();
-      packPlan = data.steps || [];
+      shiftPlanList = data.plans || [];
+      shiftPlanSelected = data.selected_plan || null;
+      renderShiftPlanPanel();
       renderPackPlanPreview();
     } catch (e) {
-      console.warn("Ошибка получения плана упаковки:", e);
+      console.warn("Ошибка получения списка сменных заданий:", e);
     }
   }
 
@@ -1491,6 +1596,7 @@ document.getElementById("bedDetails").textContent =
     const label = document.getElementById("packStateLabel");
     const phaseLabel = document.getElementById("packPhaseLabel");
     const flagsLabel = document.getElementById("packFlags");
+    const hintLabel = document.getElementById("packHint");
     if (!label || !phaseLabel) return;
 
     const active = packUiState && packUiState.active_session;
@@ -1508,6 +1614,12 @@ document.getElementById("bedDetails").textContent =
     };
     label.textContent = "Состояние: " + (stateMap[state] || "—");
     phaseLabel.textContent = "Фаза: " + (phaseMap[phase] || "—");
+
+    if (hintLabel) {
+      hintLabel.textContent = active
+        ? "Следуйте подсказкам. Кнопки не требуются."
+        : "Сканируйте QR-код кровати (SKU) для старта.";
+    }
 
     const canStart = packUiState && packUiState.can_start_sku;
     const canClose = packUiState && packUiState.can_close_box;
@@ -1564,11 +1676,7 @@ document.getElementById("bedDetails").textContent =
     if (!list) return;
     list.innerHTML = "";
 
-    const stepsState = packStepsState || {};
-    const currentIndex = stepsState.current_step_index || 0;
-    const phase = stepsState.phase;
-
-    if (!packPlan.length || !phase) {
+    if (!shiftPlanSelected || !shiftPlanSelected.items || !shiftPlanSelected.items.length) {
       const empty = document.createElement("div");
       empty.className = "pack-step-line";
       empty.innerHTML = "<span>План выкладки будет загружен автоматически</span><span>—</span>";
@@ -1576,15 +1684,102 @@ document.getElementById("bedDetails").textContent =
       return;
     }
 
-    const phaseSteps = packPlan.filter(step => step.phase === phase);
-    const preview = phaseSteps.slice(currentIndex, currentIndex + 2);
-    preview.forEach((step, idx) => {
+    const preview = shiftPlanSelected.items.slice(0, 3);
+    preview.forEach((item, idx) => {
       const row = document.createElement("div");
       row.className = "pack-step-line";
       if (idx === 0) row.classList.add("current");
-      row.innerHTML = `<span>${step.slot}</span><span>${step.part_code}</span>`;
+      row.innerHTML = `<span>${item}</span><span>SKU</span>`;
       list.appendChild(row);
     });
+  }
+
+  function renderShiftPlanPanel() {
+    /**
+     * Обновляем карточку сменного задания.
+     * Здесь мы показываем, выбран ли план, и сколько SKU в нём.
+     */
+    const nameEl = document.getElementById("shiftPlanName");
+    const countEl = document.getElementById("shiftPlanCount");
+    if (!nameEl || !countEl) return;
+
+    if (!shiftPlanSelected) {
+      nameEl.textContent = "План не выбран";
+      countEl.textContent = "Количество SKU: —";
+      return;
+    }
+
+    nameEl.textContent = `Выбран план: ${shiftPlanSelected.name}`;
+    countEl.textContent = `Количество SKU: ${shiftPlanSelected.count}`;
+  }
+
+  function renderShiftPlanSelectActions() {
+    /**
+     * Формируем список доступных планов в виде кнопок.
+     * Это позволяет выбрать план быстро, без дополнительных форм ввода.
+     */
+    shiftPlanSelectActions.innerHTML = "";
+
+    if (!shiftPlanList.length) {
+      shiftPlanSelectActions.appendChild(mkModalBtn("Планы не найдены", "primary", () => {}));
+      return;
+    }
+
+    shiftPlanList.forEach((plan) => {
+      shiftPlanSelectActions.appendChild(
+        mkModalBtn(`${plan.name} (${plan.count} SKU)`, "success", async () => {
+          await selectShiftPlan(plan.id);
+          closeShiftPlanSelectModal();
+        })
+      );
+    });
+  }
+
+  async function uploadShiftPlan(text, name) {
+    /**
+     * Загружает сменное задание в backend.
+     * Мы отправляем текст построчно, чтобы оператору было проще подготовить список.
+     */
+    try {
+      const resp = await fetch(API_SHIFT_PLAN_UPLOAD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, name: name || null }),
+      });
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({}));
+        showPackToast(detail.detail || "Не удалось загрузить план.");
+        return;
+      }
+      await fetchShiftPlanList();
+    } catch (e) {
+      showPackToast("Ошибка сети: план не загружен.");
+    }
+  }
+
+  async function selectShiftPlan(planId) {
+    /**
+     * Выбор плана влияет только на подсказки в UI.
+     * Упаковочный процесс продолжает управляться QR и FSM.
+     */
+    try {
+      const resp = await fetch(API_SHIFT_PLAN_SELECT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: planId }),
+      });
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({}));
+        showPackToast(detail.detail || "Не удалось выбрать план.");
+        return;
+      }
+      const data = await resp.json();
+      shiftPlanSelected = data.selected_plan || null;
+      renderShiftPlanPanel();
+      renderPackPlanPreview();
+    } catch (e) {
+      showPackToast("Ошибка сети: план не выбран.");
+    }
   }
 
   async function handlePackAction(url, body) {
@@ -1611,7 +1806,7 @@ document.getElementById("bedDetails").textContent =
     // После каждого действия пересчитываем UI: состояния, шаги и план.
     await fetchPackUiState();
     await fetchPackStepsState();
-    await fetchPackPlan();
+    await fetchShiftPlanList();
   }
 
   setInterval(fetchState, 1500);
@@ -1645,12 +1840,26 @@ document.getElementById("bedDetails").textContent =
   const packModalCancel = document.getElementById("packModalCancel");
   const packModalActions = document.getElementById("packModalActions");
 
+  // Модалки сменного задания: загрузка списка и выбор из сохранённых.
+  const shiftPlanUploadBackdrop = document.getElementById("shiftPlanUploadBackdrop");
+  const shiftPlanNameInput = document.getElementById("shiftPlanNameInput");
+  const shiftPlanTextarea = document.getElementById("shiftPlanTextarea");
+  const shiftPlanUploadHint = document.getElementById("shiftPlanUploadHint");
+  const shiftPlanUploadActions = document.getElementById("shiftPlanUploadActions");
+  const shiftPlanUploadCancel = document.getElementById("shiftPlanUploadCancel");
+
+  const shiftPlanSelectBackdrop = document.getElementById("shiftPlanSelectBackdrop");
+  const shiftPlanSelectActions = document.getElementById("shiftPlanSelectActions");
+  const shiftPlanSelectCancel = document.getElementById("shiftPlanSelectCancel");
+
   let modalOpen = false;
   let modalMode = "add"; // "add" | "end"
   let modalWorkerId = null;
   let initialShiftModalShown = false;
 
   let packModalOpen = false;
+  let shiftPlanUploadOpen = false;
+  let shiftPlanSelectOpen = false;
 
   // формат QR кровати:
 
@@ -1761,6 +1970,60 @@ document.getElementById("bedDetails").textContent =
     packModalOpen = false;
     packModalBackdrop.classList.remove("open");
     packModalBackdrop.setAttribute("aria-hidden", "true");
+  }
+
+  function openShiftPlanUploadModal() {
+    /**
+     * Модалка загрузки сменного задания.
+     *
+     * Список SKU задаётся построчно, чтобы оператор мог вставить его
+     * из Excel/таблицы без дополнительного форматирования.
+     */
+    shiftPlanUploadOpen = true;
+    shiftPlanUploadBackdrop.classList.add("open");
+    shiftPlanUploadBackdrop.setAttribute("aria-hidden", "false");
+    shiftPlanNameInput.value = "";
+    shiftPlanTextarea.value = "";
+    shiftPlanUploadHint.textContent = "Ожидание ввода…";
+    shiftPlanUploadActions.innerHTML = "";
+
+    const btnUpload = mkModalBtn("Загрузить", "success", async () => {
+      const text = (shiftPlanTextarea.value || "").trim();
+      if (!text) {
+        shiftPlanUploadHint.textContent = "Список SKU пуст. Вставьте значения построчно.";
+        return;
+      }
+      const name = (shiftPlanNameInput.value || "").trim();
+      await uploadShiftPlan(text, name);
+      closeShiftPlanUploadModal();
+    });
+    shiftPlanUploadActions.appendChild(btnUpload);
+    shiftPlanTextarea.focus();
+  }
+
+  function closeShiftPlanUploadModal() {
+    shiftPlanUploadOpen = false;
+    shiftPlanUploadBackdrop.classList.remove("open");
+    shiftPlanUploadBackdrop.setAttribute("aria-hidden", "true");
+  }
+
+  function openShiftPlanSelectModal() {
+    /**
+     * Модалка выбора сменного задания из списка.
+     *
+     * Мы выводим доступные планы как набор кнопок,
+     * чтобы выбор занимал 1–2 клика и не требовал ввода.
+     */
+    shiftPlanSelectOpen = true;
+    shiftPlanSelectBackdrop.classList.add("open");
+    shiftPlanSelectBackdrop.setAttribute("aria-hidden", "false");
+    renderShiftPlanSelectActions();
+  }
+
+  function closeShiftPlanSelectModal() {
+    shiftPlanSelectOpen = false;
+    shiftPlanSelectBackdrop.classList.remove("open");
+    shiftPlanSelectBackdrop.setAttribute("aria-hidden", "true");
   }
 
 function mkModalBtn(text, kind, onClick) {
@@ -1886,6 +2149,12 @@ function mkModalBtn(text, kind, onClick) {
   if (packModalCancel) {
     packModalCancel.addEventListener("click", () => closePackModal());
   }
+  if (shiftPlanUploadCancel) {
+    shiftPlanUploadCancel.addEventListener("click", () => closeShiftPlanUploadModal());
+  }
+  if (shiftPlanSelectCancel) {
+    shiftPlanSelectCancel.addEventListener("click", () => closeShiftPlanSelectModal());
+  }
 
   btnPackStart = document.getElementById("btnPackStart");
   btnPackStepComplete = document.getElementById("btnPackStepComplete");
@@ -1893,6 +2162,10 @@ function mkModalBtn(text, kind, onClick) {
   btnPackCloseBox = document.getElementById("btnPackCloseBox");
   btnPackPrintLabel = document.getElementById("btnPackPrintLabel");
   btnPackTableEmpty = document.getElementById("btnPackTableEmpty");
+  const btnManualToggle = document.getElementById("btnManualToggle");
+  const manualControls = document.getElementById("manualControls");
+  const btnShiftPlanUpload = document.getElementById("btnShiftPlanUpload");
+  const btnShiftPlanSelect = document.getElementById("btnShiftPlanSelect");
 
   if (btnPackStart) {
     btnPackStart.addEventListener("click", () => {
@@ -1929,6 +2202,24 @@ function mkModalBtn(text, kind, onClick) {
       if (btnPackTableEmpty.classList.contains("disabled")) return;
       handlePackAction("/api/kiosk/pack/table-empty");
     });
+  }
+
+  if (btnManualToggle && manualControls) {
+    btnManualToggle.addEventListener("click", () => {
+      /**
+       * Кнопки ручного режима скрыты по умолчанию,
+       * чтобы не провоцировать оператора на ручные действия.
+       * Супервайзер осознанно раскрывает этот блок при необходимости.
+       */
+      manualControls.classList.toggle("open");
+    });
+  }
+
+  if (btnShiftPlanUpload) {
+    btnShiftPlanUpload.addEventListener("click", () => openShiftPlanUploadModal());
+  }
+  if (btnShiftPlanSelect) {
+    btnShiftPlanSelect.addEventListener("click", () => openShiftPlanSelectModal());
   }
 
   // helper для отладочной подписи внизу
@@ -2071,6 +2362,12 @@ function mkModalBtn(text, kind, onClick) {
     }
     if (e.key === "Escape" && packModalOpen) {
       closePackModal();
+    }
+    if (e.key === "Escape" && shiftPlanUploadOpen) {
+      closeShiftPlanUploadModal();
+    }
+    if (e.key === "Escape" && shiftPlanSelectOpen) {
+      closeShiftPlanSelectModal();
     }
   });
 </script>
