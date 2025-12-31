@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Literal
+import json
 import time
 
 from fastapi import FastAPI, HTTPException
@@ -8,16 +9,31 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.logic import engine, KioskUIState
-from core.storage import get_conn
+from core.storage import (
+    get_conn,
+    create_shift_plan,
+    get_active_shift_id,
+    get_shift_plan,
+    list_shift_plans,
+)
+from services.packaging import (
+    advance_phase,
+    apply_event,
+    complete_current_step,
+    compute_pack_ui_flags,
+    get_active_session as get_pack_active_session,
+    get_latest_session as get_pack_latest_session,
+    get_plan_for_session,
+    get_state as get_pack_state,
+    get_steps_state,
+    start_session as start_pack_session,
+    EVENT_CLOSE_BOX,
+    EVENT_PRINT_LABEL,
+    EVENT_TABLE_EMPTY,
+    PackagingTransitionError,
+)
 from services.timers import record_timer_state, record_heartbeat
-
-from core.storage import get_conn
-from services.timers import record_timer_state, record_heartbeat
-
-from core.storage import get_shift_report
-
-from core.storage import get_conn
-from services.timers import record_timer_state, record_heartbeat
+from services import shift_plans
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -130,6 +146,20 @@ class TimerStateRequest(BaseModel):
 
 class TimerHeartbeatRequest(BaseModel):
     source: Optional[str] = "kiosk"
+
+
+class PackStartRequest(BaseModel):
+    sku: str
+
+
+class ShiftPlanUploadRequest(BaseModel):
+    name: Optional[str] = None
+    text: Optional[str] = None
+    items: Optional[List[str]] = None
+
+
+class ShiftPlanSelectRequest(BaseModel):
+    plan_id: int
 
 
 app = FastAPI(title="KZ Kiosk API")
@@ -331,6 +361,243 @@ async def timer_heartbeat(payload: TimerHeartbeatRequest):
         source=payload.source,
     )
     return {"status": "ok"}
+
+
+@app.post("/api/kiosk/pack/start")
+async def pack_start(payload: PackStartRequest):
+    """
+    Старт упаковочной сессии по SKU.
+
+    Важно:
+    - Бизнес-правила проверяются в сервисе packaging.
+    - Здесь мы только транслируем ошибки в HTTP 409.
+    """
+    try:
+        state = start_pack_session(payload.sku)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.post("/api/kiosk/pack/table-empty")
+async def pack_table_empty():
+    """
+    Подтверждает, что стол пустой.
+
+    Это обязательный gate перед стартом следующего SKU.
+    Мы не меняем FSM напрямую, а вызываем сервисный слой.
+    """
+    try:
+        state = apply_event(EVENT_TABLE_EMPTY)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.post("/api/kiosk/pack/close-box")
+async def pack_close_box():
+    """
+    Фиксирует закрытие коробки.
+
+    Разрешено только из состояния STARTED.
+    """
+    try:
+        state = apply_event(EVENT_CLOSE_BOX)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.post("/api/kiosk/pack/print-label")
+async def pack_print_label():
+    """
+    Фиксирует печать этикетки.
+
+    Разрешено только после BOX_CLOSED.
+    """
+    try:
+        state = apply_event(EVENT_PRINT_LABEL)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.get("/api/kiosk/pack/state")
+async def pack_state():
+    """
+    Возвращает компактное состояние упаковки.
+    Это вспомогательный endpoint, без расширенных флагов UI.
+    """
+    return {"status": "ok", "state": get_pack_state()}
+
+
+@app.get("/api/kiosk/pack/ui-state")
+async def pack_ui_state():
+    """
+    Расширенное состояние упаковки для UI.
+
+    Важно:
+    - active_session показывает текущий SKU (если есть).
+    - pack_state/flags вычисляются из FSM, чтобы фронт не дублировал правила.
+    """
+    active_session = get_pack_active_session()
+    session_for_flags = active_session or get_pack_latest_session()
+    flags = compute_pack_ui_flags(session_for_flags)
+    return {
+        "active_session": active_session,
+        "pack_state": session_for_flags["state"] if session_for_flags else None,
+        **flags,
+    }
+
+
+@app.post("/api/kiosk/pack/plan/upload")
+async def pack_plan_upload(payload: ShiftPlanUploadRequest):
+    """
+    Загружает сменное задание (список SKU) для активной смены.
+
+    Мы принимаем либо текст со строками, либо JSON-список,
+    чтобы оператор мог быстро вставить список без лишнего формата.
+    """
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены для загрузки плана.")
+
+    raw_items: List[str] = []
+    if payload.items:
+        raw_items = payload.items
+    elif payload.text:
+        raw_items = payload.text.splitlines()
+
+    items = [item.strip() for item in raw_items if item and item.strip()]
+    if not items:
+        raise HTTPException(status_code=400, detail="Список SKU пуст.")
+
+    name = (payload.name or "Сменное задание").strip()
+    plan_id = create_shift_plan(
+        shift_id=shift_id,
+        name=name,
+        created_at=time.time(),
+        items_json=json.dumps(items, ensure_ascii=False),
+    )
+    return {"status": "ok", "id": plan_id, "name": name, "count": len(items)}
+
+
+@app.get("/api/kiosk/pack/plan/list")
+async def pack_plan_list():
+    """
+    Возвращает список сменных заданий для активной смены.
+    Выбранный план отмечаем отдельно, чтобы UI мог показать текущий выбор.
+    """
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
+
+    plans = []
+    for row in list_shift_plans(shift_id):
+        items = json.loads(row["items_json"] or "[]")
+        plans.append(
+            {
+                "id": int(row["id"]),
+                "name": row["name"],
+                "count": len(items),
+            }
+        )
+
+    selected_id = shift_plans.get_selected_plan_id(shift_id)
+    selected_plan = None
+    if selected_id:
+        row = get_shift_plan(selected_id)
+        if row and int(row["shift_id"]) == int(shift_id):
+            items = json.loads(row["items_json"] or "[]")
+            selected_plan = {
+                "id": int(row["id"]),
+                "name": row["name"],
+                "count": len(items),
+                "items": items,
+            }
+
+    return {"status": "ok", "plans": plans, "selected_id": selected_id, "selected_plan": selected_plan}
+
+
+@app.post("/api/kiosk/pack/plan/select")
+async def pack_plan_select(payload: ShiftPlanSelectRequest):
+    """
+    Выбирает активный план для текущей смены.
+    Это влияет только на подсказки в UI и не меняет логику упаковки.
+    """
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
+
+    row = get_shift_plan(payload.plan_id)
+    if not row or int(row["shift_id"]) != int(shift_id):
+        raise HTTPException(status_code=404, detail="План не найден для активной смены.")
+
+    shift_plans.select_plan(shift_id, payload.plan_id)
+    items = json.loads(row["items_json"] or "[]")
+    return {
+        "status": "ok",
+        "selected_plan": {
+            "id": int(row["id"]),
+            "name": row["name"],
+            "count": len(items),
+            "items": items,
+        },
+    }
+
+
+@app.get("/api/kiosk/pack/plan")
+async def pack_plan():
+    """
+    Возвращает план шагов для активного SKU.
+
+    План формируется сервисом и нужен UI для отображения прогресса.
+    """
+    active_session = get_pack_active_session()
+    if not active_session:
+        raise HTTPException(status_code=409, detail="Нет активной упаковочной сессии.")
+    return {"status": "ok", "steps": get_plan_for_session(active_session)}
+
+
+@app.get("/api/kiosk/pack/steps/state")
+async def pack_steps_state():
+    """
+    Возвращает состояние шагов (фаза, индекс, текущий шаг).
+    Это основная точка синхронизации UI и backend.
+    """
+    active_session = get_pack_active_session()
+    if not active_session:
+        raise HTTPException(status_code=409, detail="Нет активной упаковочной сессии.")
+    return {"status": "ok", **get_steps_state(active_session)}
+
+
+@app.post("/api/kiosk/pack/step/complete")
+async def pack_step_complete():
+    """
+    Завершает текущий шаг упаковки.
+
+    Логика проверки и запись события живёт в сервисе,
+    здесь только транслируем результат.
+    """
+    try:
+        result = complete_current_step()
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", **result}
+
+
+@app.post("/api/kiosk/pack/phase/next")
+async def pack_phase_next():
+    """
+    Переводит процесс из LAYOUT в PACKING.
+
+    Нельзя перейти, если есть незавершённые шаги LAYOUT.
+    """
+    try:
+        result = advance_phase()
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", **result}
 
 
 if __name__ == "__main__":
