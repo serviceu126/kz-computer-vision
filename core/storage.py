@@ -67,6 +67,21 @@ def init_db():
     ON worker_shifts(worker_id, is_active)
     """)
 
+<<<<<<< HEAD
+    # Минимальная таблица событий (events).
+    # Зачем: хранит факты смены состояний таймера и heartbeat,
+    # чтобы считать work/idle по событиям, а не по "тикерам".
+    # CREATE TABLE IF NOT EXISTS безопасен для существующих БД.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts REAL NOT NULL,
+        type TEXT NOT NULL,
+        payload_json TEXT,
+        shift_id INTEGER,
+        session_id INTEGER,
+        worker_id TEXT
+=======
     # Минимальная событийная модель (events).
     # Зачем: даёт единый журнал ключевых фактов (старт/финиш/упаковка),
     # чтобы потом строить отчёты без усложнения таблиц сессий и без ломки истории.
@@ -80,6 +95,7 @@ def init_db():
         shift_id INTEGER NULL,
         session_id INTEGER NULL,
         worker_id TEXT NULL
+>>>>>>> main
     )
     """)
 
@@ -116,6 +132,33 @@ def save_session(session) -> int:
     conn.commit()
     conn.close()
     return int(session_id or 0)
+
+
+def add_event(
+    event_type: str,
+    ts: float,
+    payload_json: str = "",
+    shift_id: int | None = None,
+    session_id: int | None = None,
+    worker_id: str | None = None,
+) -> int:
+    """
+    Добавляем событие в events.
+    - Что делаем: записываем тип события и время (ts).
+    - Зачем: события нужны для вычисления work/idle и heartbeat-авто-idle.
+    - Как использовать: вызовы из /api/kiosk/timer/state и /api/kiosk/timer/heartbeat.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [ts, event_type, payload_json or "", shift_id, session_id, worker_id],
+    )
+    event_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(event_id or 0)
 
 
 def start_worker_shift(worker_id: str, work_center: str) -> int:
