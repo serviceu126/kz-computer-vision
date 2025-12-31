@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.logic import engine, KioskUIState
+from core.storage import get_shift_report
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 KIOSK_DIR = BASE_DIR / "web" / "kiosk"
@@ -223,10 +224,17 @@ async def shift_add(payload: ShiftWorkerRequest):
 
 
 @app.post("/api/kiosk/shift/start")
+<<<<<<< HEAD
 async def shift_start(payload: ShiftStartRequest):
     # Новый эндпоинт старта смены.
     # Возвращаем shift_id, чтобы фронт/интеграции могли связать события со сменой.
     shift_id = engine.add_worker_to_shift(worker_id=payload.worker_id, work_center=payload.work_center)
+=======
+async def shift_start(payload: ShiftWorkerRequest):
+    # Новый API-метод для явного старта смены на РЦ.
+    # Возвращаем shift_id, чтобы фронт мог связать сессию упаковки со сменой.
+    shift_id = engine.add_worker_to_shift(worker_id=payload.worker_id, work_center=payload.work_center or "")
+>>>>>>> main
     return {"status": "ok", "shift_id": shift_id}
 
 
@@ -234,6 +242,16 @@ async def shift_start(payload: ShiftStartRequest):
 async def shift_end(payload: ShiftEndRequest):
     closed = engine.close_worker_shift(worker_id=payload.worker_id, work_centers=payload.work_centers)
     return {"status": "ok", "closed": closed}
+
+
+@app.get("/api/kiosk/report/shift")
+async def get_shift_report_api(shift_id: int):
+    # Минимальный отчёт по смене.
+    # Что делаем: отдаём агрегаты из get_shift_report (events + sessions).
+    # Зачем: это быстрый способ проверить packed_count и work/idle.
+    # Как тестировать (curl):
+    #   curl -s "http://127.0.0.1:8000/api/kiosk/report/shift?shift_id=1"
+    return get_shift_report(shift_id)
 
 
 if __name__ == "__main__":
