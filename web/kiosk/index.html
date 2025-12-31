@@ -550,9 +550,10 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
-      width: 52%;
+      width: 100%;
       min-width: 280px;
-      align-self: flex-start;
+        flex: 1.4;
+  min-height: 0;
     }
 
     .pack-row {
@@ -1014,7 +1015,7 @@
         </div>
       </div>
 
-      <div class="card steps-card" style="flex:1; min-height:0;">
+      <div class="card steps-card" style="flex:0.5; min-height:0;">
         <div>
           <div class="card-title">Прогресс комплекта</div>
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
