@@ -1,7 +1,14 @@
-# conftest.py (в корне репозитория)
-import sys
+"""
+Глобальные настройки pytest.
+Здесь отключаем сбор архивных файлов, чтобы не тянуть устаревшие тесты.
+"""
+
+from __future__ import annotations
+
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+
+def pytest_ignore_collect(collection_path: Path, config) -> bool:
+    # Пропускаем архивные директории с устаревшими файлами,
+    # чтобы избежать дублирования тестов и ошибок коллекции.
+    return "АРХИВ" in str(collection_path)

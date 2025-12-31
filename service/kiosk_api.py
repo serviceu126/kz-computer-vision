@@ -2,15 +2,14 @@ from pathlib import Path
 from typing import List, Optional, Literal
 import time
 
-from fastapi import HTTPException
-
-
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.logic import engine, KioskUIState
+from core.storage import get_conn
+from services.timers import record_timer_state, record_heartbeat
 
 from core.storage import get_conn
 from services.timers import record_timer_state, record_heartbeat
@@ -74,11 +73,7 @@ class KioskState(BaseModel):
     timer_state: Optional[str] = None
     work_minutes: int = 0
     idle_minutes: int = 0
-
     heartbeat_age_sec: Optional[int] = None
-
-    heartbeat_age_sec: Optional[int] = None
-
 
     last_pack_seconds: int
     best_pack_seconds: int
@@ -133,10 +128,8 @@ class TimerStateRequest(BaseModel):
     reason: Optional[str] = None
 
 
-
 class TimerHeartbeatRequest(BaseModel):
     source: Optional[str] = "kiosk"
-
 
 
 app = FastAPI(title="KZ Kiosk API")
@@ -272,15 +265,11 @@ async def shift_end(payload: ShiftEndRequest):
     return {"status": "ok", "closed": closed}
 
 
-
 @app.post("/api/kiosk/timer/state")
 async def timer_state(payload: TimerStateRequest):
     # Смена состояния таймера work/idle.
-    # Что делаем: определяем активную сессию и её shift_id.
-    # Если смена не активна — возвращаем 409 (конфликт состояния).
-    # Идемпотентность: если состояние уже такое же — не пишем событие.
-
-
+    # Что делаем: ищем активную сессию и её shift_id.
+    # Если смена не активна — возвращаем 409.
     shift_id, worker_id = engine.get_active_session_shift_context()
     if not shift_id:
         raise HTTPException(
@@ -288,23 +277,10 @@ async def timer_state(payload: TimerStateRequest):
             detail="Нет активной смены для текущей упаковочной сессии.",
         )
 
-
-    from services.timers import record_timer_state
-    from core.storage import get_conn
-
-    # Проверяем, что смена реально активна в БД.
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """SELECT is_active FROM worker_shifts WHERE id=?""",
-        [shift_id],
-    )
-
     # Проверяем, что смена ещё активна в БД.
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT is_active FROM worker_shifts WHERE id=?", [shift_id])
-
     row = cur.fetchone()
     conn.close()
     if not row or int(row["is_active"]) != 1:
@@ -312,10 +288,6 @@ async def timer_state(payload: TimerStateRequest):
             status_code=409,
             detail="Смена уже закрыта, таймер не может менять состояние.",
         )
-
-
-    # session_id пока неизвестен (сессия сохраняется в БД только на finish),
-    # поэтому пишем NULL и опираемся на shift_id как основной ключ.
 
     created = record_timer_state(
         shift_id=shift_id,
@@ -326,7 +298,6 @@ async def timer_state(payload: TimerStateRequest):
         worker_id=worker_id,
     )
     return {"status": "ok", "created": created}
-
 
 
 @app.post("/api/kiosk/timer/heartbeat")
@@ -360,16 +331,6 @@ async def timer_heartbeat(payload: TimerHeartbeatRequest):
         source=payload.source,
     )
     return {"status": "ok"}
-
-@app.get("/api/kiosk/report/shift")
-async def get_shift_report_api(shift_id: int):
-    # Минимальный отчёт по смене.
-    # Что делаем: отдаём агрегаты из get_shift_report (events + sessions).
-    # Зачем: это быстрый способ проверить packed_count и work/idle.
-    # Как тестировать (curl):
-    #   curl -s "http://127.0.0.1:8000/api/kiosk/report/shift?shift_id=1"
-    return get_shift_report(shift_id)
-
 
 
 if __name__ == "__main__":
