@@ -83,6 +83,36 @@ def init_db():
     )
     """)
 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS pack_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sku TEXT NOT NULL,
+        start_time REAL NOT NULL,
+        end_time REAL,
+        state TEXT NOT NULL,
+        shift_id INTEGER,
+        worker_id TEXT
+    )
+    """)
+
+    cur.execute("PRAGMA table_info(pack_sessions)")
+    pack_columns = [row["name"] for row in cur.fetchall()]
+    if "shift_id" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN shift_id INTEGER")
+    if "worker_id" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN worker_id TEXT")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS pack_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts REAL NOT NULL,
+        type TEXT NOT NULL,
+        payload_json TEXT,
+        session_id INTEGER NOT NULL,
+        sku TEXT
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -151,6 +181,98 @@ def add_event(
     conn.commit()
     conn.close()
     return int(event_id or 0)
+
+
+def create_pack_session(
+    sku: str,
+    ts: float,
+    state: str,
+    shift_id: int | None = None,
+    worker_id: str | None = None,
+) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO pack_sessions(sku, start_time, end_time, state, shift_id, worker_id)
+           VALUES (?, ?, NULL, ?, ?, ?)""",
+        [sku, ts, state, shift_id, worker_id],
+    )
+    session_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(session_id or 0)
+
+
+def update_pack_session_state(session_id: int, state: str, end_time: float | None = None) -> None:
+    conn = get_conn()
+    cur = conn.cursor()
+    if end_time is None:
+        cur.execute(
+            """UPDATE pack_sessions
+               SET state=?
+               WHERE id=?""",
+            [state, session_id],
+        )
+    else:
+        cur.execute(
+            """UPDATE pack_sessions
+               SET state=?, end_time=?
+               WHERE id=?""",
+            [state, end_time, session_id],
+        )
+    conn.commit()
+    conn.close()
+
+
+def add_pack_event(
+    session_id: int,
+    event_type: str,
+    ts: float,
+    payload_json: str = "",
+    sku: str | None = None,
+) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO pack_events(ts, type, payload_json, session_id, sku)
+           VALUES (?, ?, ?, ?, ?)""",
+        [ts, event_type, payload_json or "", session_id, sku],
+    )
+    event_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(event_id or 0)
+
+
+def get_pack_session(session_id: int) -> sqlite3.Row | None:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pack_sessions WHERE id=?", [session_id])
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def get_latest_pack_session() -> sqlite3.Row | None:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pack_sessions ORDER BY id DESC LIMIT 1")
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def get_active_pack_session() -> sqlite3.Row | None:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT * FROM pack_sessions
+           WHERE state IN ('started', 'box_closed')
+           ORDER BY id DESC LIMIT 1"""
+    )
+    row = cur.fetchone()
+    conn.close()
+    return row
 
 
 def start_worker_shift(worker_id: str, work_center: str) -> int:
