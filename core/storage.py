@@ -30,6 +30,17 @@ def init_db():
     )
     """)
 
+    # ВАЖНО: добавляем связь с "сменой" (shift_id) безопасно.
+    # Таблица sessions могла быть создана ранее без этого поля.
+    # Поэтому делаем проверку структуры и добавляем колонку только при отсутствии.
+    cur.execute("PRAGMA table_info(sessions)")
+    session_columns = [row["name"] for row in cur.fetchall()]
+    if "shift_id" not in session_columns:
+        # shift_id может быть NULL, если активной смены нет.
+        # Это важно для запуска сессии без заранее открытой смены.
+        cur.execute("ALTER TABLE sessions ADD COLUMN shift_id INTEGER")
+
+    # Учёт смен и рабочих центров (РЦ).
     # Миграция: добавляем shift_id в sessions, если его ещё нет.
     # Это поле остаётся NULL для старых записей и случаев без активной смены,
     # чтобы сохранить обратную совместимость и не ломать существующие данные.
@@ -76,7 +87,7 @@ def init_db():
     conn.close()
 
 
-def save_session(session):
+def save_session(session) -> int:
     conn = get_conn()
     cur = conn.cursor()
 
@@ -97,11 +108,76 @@ def save_session(session):
         session.worktime_sec,
         session.downtime_sec,
         session.status,
+        getattr(session, "shift_id", None),
         shift_id,
     ])
 
+    session_id = cur.lastrowid
     conn.commit()
     conn.close()
+    return int(session_id or 0)
+
+
+def add_event(
+    event_type: str,
+    ts: float,
+    payload_json: str = "",
+    shift_id: int | None = None,
+    session_id: int | None = None,
+    worker_id: str | None = None,
+) -> int:
+    """
+
+    Добавляет событие в таблицу events.
+    - Что делает: пишет запись с типом события и временем (ts).
+    - Зачем: события нужны для вычисления work/idle на основе смены состояния,
+      а не на основе частых heartbeat-тикеров.
+    - Как использовать: вызывать при смене состояния таймера (WORK_STARTED/IDLE_STARTED).
+
+    Добавляем событие в events.
+    - Что делаем: записываем тип события и время (ts).
+    - Зачем: события нужны для вычисления work/idle и heartbeat-авто-idle.
+    - Как использовать: вызовы из /api/kiosk/timer/state и /api/kiosk/timer/heartbeat.
+
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [ts, event_type, payload_json or "", shift_id, session_id, worker_id],
+    )
+    event_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(event_id or 0)
+
+
+def add_event(
+    event_type: str,
+    ts: float,
+    payload_json: str = "",
+    shift_id: int | None = None,
+    session_id: int | None = None,
+    worker_id: str | None = None,
+) -> int:
+    """
+    Добавляем событие в events.
+    - Что делаем: записываем тип события и время (ts).
+    - Зачем: события нужны для вычисления work/idle и heartbeat-авто-idle.
+    - Как использовать: вызовы из /api/kiosk/timer/state и /api/kiosk/timer/heartbeat.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [ts, event_type, payload_json or "", shift_id, session_id, worker_id],
+    )
+    event_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(event_id or 0)
 
 
 def add_event(
@@ -132,6 +208,7 @@ def add_event(
 
 
 def start_worker_shift(worker_id: str, work_center: str) -> int:
+    """Открывает смену сотрудника на указанном РЦ и возвращает shift_id."""
     """Открывает смену сотрудника на указанном РЦ. Возвращает ID новой смены."""
     worker_id = (worker_id or "").strip()
     work_center = (work_center or "").strip().upper()
@@ -140,6 +217,9 @@ def start_worker_shift(worker_id: str, work_center: str) -> int:
 
     conn = get_conn()
     cur = conn.cursor()
+
+    # Закрываем предыдущую активную смену на этом РЦ (если есть).
+    # Это важно: у сотрудника может быть только одна активная смена на одном РЦ.
     now = time.time()
 
     # Закрываем предыдущую активную смену на этом же РЦ (если была),
@@ -148,9 +228,10 @@ def start_worker_shift(worker_id: str, work_center: str) -> int:
         """UPDATE worker_shifts
            SET end_time=?, is_active=0
            WHERE worker_id=? AND work_center=? AND is_active=1""",
-        [now, worker_id, work_center],
+        [time.time(), worker_id, work_center],
     )
 
+    # Создаём новую смену и возвращаем её идентификатор.
     # Открываем новую смену и возвращаем её ID,
     # чтобы можно было привязать к ней сессию упаковки.
     cur.execute(
@@ -158,6 +239,10 @@ def start_worker_shift(worker_id: str, work_center: str) -> int:
            VALUES (?, ?, ?, NULL, 1)""",
         [worker_id, work_center, now],
     )
+    shift_id = int(cur.lastrowid or 0)
+    conn.commit()
+    conn.close()
+    return shift_id
     shift_id = cur.lastrowid
     conn.commit()
     conn.close()
@@ -176,6 +261,7 @@ def end_worker_shift(worker_id: str, work_centers: list[str] | None = None) -> i
     # Если передан список РЦ — закрываем только их,
     # иначе закрываем все активные смены сотрудника.
     if work_centers:
+        # Закрываем смены только по указанным РЦ.
         centers = [c.strip().upper() for c in work_centers if c and c.strip()]
         if not centers:
             conn.close()
@@ -188,6 +274,7 @@ def end_worker_shift(worker_id: str, work_centers: list[str] | None = None) -> i
             [now, worker_id, *centers],
         )
     else:
+        # Закрываем все активные смены сотрудника.
         cur.execute(
             """UPDATE worker_shifts
                 SET end_time=?, is_active=0
@@ -202,6 +289,7 @@ def end_worker_shift(worker_id: str, work_centers: list[str] | None = None) -> i
 
 
 def get_active_shifts() -> list[dict]:
+    """Список активных смен: [{worker_id, work_center, start_time, shift_id}]."""
     """Список активных смен: [{shift_id, worker_id, work_center, start_time}]."""
     conn = get_conn()
     cur = conn.cursor()
@@ -219,6 +307,7 @@ def get_active_shifts() -> list[dict]:
             "worker_id": r["worker_id"],
             "work_center": r["work_center"],
             "start_time": r["start_time"],
+            "shift_id": r["id"],
         }
         for r in rows
     ]
@@ -262,6 +351,28 @@ def get_worker_active_centers(worker_id: str) -> list[str]:
     return [r["work_center"] for r in rows]
 
 
+def get_latest_active_shift_id(worker_id: str) -> int | None:
+    # Возвращаем самую "свежую" активную смену сотрудника.
+    # Это нужно для привязки упаковочной сессии к конкретной смене.
+    worker_id = (worker_id or "").strip()
+    if not worker_id:
+        return None
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id FROM worker_shifts
+           WHERE worker_id=? AND is_active=1
+           ORDER BY start_time DESC
+           LIMIT 1""",
+        [worker_id],
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return int(row["id"])
+
+
 def count_sessions_since(start_time: float, worker_id: str | None = None) -> int:
     worker_id = (worker_id or "").strip()
     conn = get_conn()
@@ -281,3 +392,92 @@ def count_sessions_since(start_time: float, worker_id: str | None = None) -> int
     row = cur.fetchone()
     conn.close()
     return int(row["cnt"] if row else 0)
+
+
+
+def get_shift_report(shift_id: int) -> dict:
+    """
+    Минимальный отчёт по смене.
+    - Что делаем: считаем packed_count через events и суммируем времена из sessions.
+    - Зачем: нужен быстрый источник метрик для API /report.
+    - Как влияет на метрики: packed_count растёт по событиям PACKED_CONFIRMED.
+    - Тестирование (curl):
+      1) Запустить смену и упаковать комплект со status=done.
+      2) GET /api/kiosk/report/shift?shift_id=...
+    """
+    if not shift_id:
+        return {
+            "shift_id": 0,
+            "packed_count": 0,
+            "worktime_sec": 0,
+            "downtime_sec": 0,
+            "per_worker": {},
+        }
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute(
+        """SELECT COUNT(*) AS cnt
+           FROM events
+           WHERE shift_id=? AND type='PACKED_CONFIRMED'""",
+        [shift_id],
+    )
+    row = cur.fetchone()
+    packed_count = int(row["cnt"] if row else 0)
+
+    cur.execute(
+        """SELECT
+               COALESCE(SUM(worktime_sec), 0) AS worktime_sec,
+               COALESCE(SUM(downtime_sec), 0) AS downtime_sec
+           FROM sessions
+           WHERE shift_id=?""",
+        [shift_id],
+    )
+    totals = cur.fetchone()
+    worktime_sec = int((totals["worktime_sec"] if totals else 0) or 0)
+    downtime_sec = int((totals["downtime_sec"] if totals else 0) or 0)
+
+    cur.execute(
+        """SELECT worker_id,
+                  COALESCE(SUM(worktime_sec), 0) AS worktime_sec,
+                  COALESCE(SUM(downtime_sec), 0) AS downtime_sec
+           FROM sessions
+           WHERE shift_id=?
+           GROUP BY worker_id""",
+        [shift_id],
+    )
+    per_worker_rows = cur.fetchall() or []
+
+    cur.execute(
+        """SELECT worker_id, COUNT(*) AS cnt
+           FROM events
+           WHERE shift_id=? AND type='PACKED_CONFIRMED'
+           GROUP BY worker_id""",
+        [shift_id],
+    )
+    packed_per_worker_rows = cur.fetchall() or []
+
+    conn.close()
+
+    per_worker = {}
+    for row in per_worker_rows:
+        wid = row["worker_id"] or ""
+        per_worker[wid] = {
+            "packed_count": 0,
+            "worktime_sec": int(row["worktime_sec"] or 0),
+            "downtime_sec": int(row["downtime_sec"] or 0),
+        }
+
+    for row in packed_per_worker_rows:
+        wid = row["worker_id"] or ""
+        per_worker.setdefault(wid, {"packed_count": 0, "worktime_sec": 0, "downtime_sec": 0})
+        per_worker[wid]["packed_count"] = int(row["cnt"] or 0)
+
+    return {
+        "shift_id": int(shift_id),
+        "packed_count": packed_count,
+        "worktime_sec": worktime_sec,
+        "downtime_sec": downtime_sec,
+        "per_worker": per_worker,
+    }
