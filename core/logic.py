@@ -13,10 +13,6 @@ from core.storage import (
     get_active_shifts,
     get_latest_active_shift_id,
     count_sessions_since,
-<<<<<<< HEAD
-=======
-    add_event,
->>>>>>> main
 )
 from services.timers import compute_work_idle_seconds, get_heartbeat_age_sec
 from core.voice import say
@@ -85,6 +81,23 @@ class KioskUIState:
     work_minutes: int
     idle_minutes: int
     heartbeat_age_sec: Optional[int]
+
+    # Новые поля для таймеров на основе событий.
+    # timer_state: текущее состояние таймера (work/idle/None)
+    # work_minutes/idle_minutes: округление вниз по минутам.
+    timer_state: Optional[str]
+    work_minutes: int
+    idle_minutes: int
+
+    # Таймерные поля на основе событий:
+    # timer_state: текущее состояние таймера (work/idle/None)
+    # work_minutes/idle_minutes: округление вниз до минут
+    # heartbeat_age_sec: возраст последнего heartbeat (секунды) или None
+    timer_state: Optional[str]
+    work_minutes: int
+    idle_minutes: int
+    heartbeat_age_sec: Optional[int]
+
 
     last_pack_seconds: int
     best_pack_seconds: int
@@ -181,14 +194,14 @@ class KioskEngine:
         wc = (work_center or "").strip().upper()
         if not wid or not wc:
             return 0
-<<<<<<< HEAD
+
         # ВАЖНО: start_worker_shift возвращает shift_id.
         # Это нужно для API /api/kiosk/shift/start, чтобы отдать идентификатор смены.
-=======
+
 
         # Запускаем смену и получаем её ID,
         # чтобы при необходимости вернуть его в API.
->>>>>>> main
+
         shift_id = start_worker_shift(wid, wc)
         self._active_shifts_cache = get_active_shifts()
 
@@ -278,14 +291,13 @@ class KioskEngine:
                 start_time=time.time(),
                 status="running",
             )
-<<<<<<< HEAD
+
             # Привязываем сессию к активной смене (если она есть).
             # Мы не добавляем поле в PackSession, а используем динамический атрибут,
             # чтобы не менять отдельный файл core/session.py.
-=======
             # Сохраняем shift_id прямо в объекте сессии,
             # чтобы при записи в БД сохранить привязку к смене.
->>>>>>> main
+
             self._session.shift_id = shift_id
             self._session_start_ts = self._session.start_time
 
@@ -311,7 +323,7 @@ class KioskEngine:
             # чтобы packed_count считался по events (без ручных счётчиков).
             if status == "done":
                 add_event(
-                    type="PACKED_CONFIRMED",
+                    event_type="PACKED_CONFIRMED",
                     ts=self._session.finish_time or time.time(),
                     shift_id=getattr(self._session, "shift_id", None),
                     session_id=session_id or None,
@@ -362,7 +374,7 @@ class KioskEngine:
         # Это нужно для корректного packed_count в отчётах по смене.
         if status == "done":
             add_event(
-                type="PACKED_CONFIRMED",
+                event_type="PACKED_CONFIRMED",
                 ts=self._session.finish_time or time.time(),
                 shift_id=getattr(self._session, "shift_id", None),
                 session_id=session_id or None,
@@ -526,6 +538,43 @@ class KioskEngine:
             work_minutes = int(work_seconds // 60)
             idle_minutes = int(idle_seconds // 60)
 
+            # Для таймера берём shift_id активной сессии (если есть),
+            # иначе — первую активную смену из списка (минимальный вариант).
+
+            # Для расчёта таймера используем shift_id активной сессии,
+            # либо первую активную смену из списка (минимальный fallback).
+
+            # Для расчёта таймера используем shift_id активной сессии,
+            # либо первую активную смену из списка (минимальный fallback).
+
+            shift_id_for_timer = None
+            if self._session and getattr(self._session, "shift_id", None):
+                shift_id_for_timer = self._session.shift_id
+            elif self._active_shifts_cache:
+                shift_id_for_timer = self._active_shifts_cache[0].get("shift_id")
+
+            work_seconds = 0
+            idle_seconds = 0
+            timer_state = None
+
+            heartbeat_age_sec = None
+
+            heartbeat_age_sec = None
+
+            if shift_id_for_timer:
+                work_seconds, idle_seconds, timer_state = compute_work_idle_seconds(
+                    shift_id_for_timer,
+                    datetime.utcnow(),
+                )
+
+                heartbeat_age_sec = get_heartbeat_age_sec(
+                    shift_id_for_timer,
+                    datetime.utcnow(),
+                )
+
+            work_minutes = int(work_seconds // 60)
+            idle_minutes = int(idle_seconds // 60)
+
             # нет активной сессии — показываем ожидание
             if not self._session:
                 return KioskUIState(
@@ -635,7 +684,7 @@ class KioskEngine:
                 )
 
 
-<<<<<<< HEAD
+
             work_sec = int(sess.worktime_sec)
             idle_sec = int(sess.downtime_sec)
 
@@ -649,8 +698,6 @@ class KioskEngine:
                 work_sec = work_seconds
                 idle_sec = idle_seconds
 
-=======
->>>>>>> main
             sku = sess.product_code
             last_pack = self._last_pack_per_sku.get(sku, 0)
             best_pack = self._best_pack_per_sku.get(sku, 0)
