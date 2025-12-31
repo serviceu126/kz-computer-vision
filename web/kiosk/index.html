@@ -641,16 +641,42 @@
     }
 
     /* ВАЖНО: упаковка должна быть визуально важнее прогресса.
-       Мы делаем блок "Упаковка" выше и крупнее,
-       а "Прогресс комплекта" — менее доминирующим, чтобы не отвлекать. */
+       Поэтому только этот блок может растягиваться по высоте,
+       чтобы оператор всегда видел основное состояние и текущий шаг. */
     .pack-card {
-      flex: 1.4;
+      flex: 1 1 auto;
+      min-height: 0;
     }
 
     /* Прогресс показываем компактно: оператору важнее текущее действие,
-       а детальная статистика — вторична. */
+       поэтому ограничиваем рост по высоте и не даём блоку "расползаться". */
     .steps-card {
-      flex: 0.6;
+      flex: 0 0 auto;
+      min-height: 140px;
+      max-height: 220px;
+    }
+
+    /* Контейнер правой колонки:
+       задаём управляемую flex-ось и высоту,
+       чтобы только "Упаковка" растягивалась, а остальные блоки оставались компактными. */
+    .right-column {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+      height: 100%;
+    }
+
+    /* Компактный блок сменного задания:
+       он информирует, но не должен забирать вертикальное пространство. */
+    .shift-plan-card {
+      flex: 0 0 auto;
+    }
+
+    /* Блок "Текущая команда":
+       высота строго по содержимому, чтобы не конкурировать с упаковкой. */
+    .instruction-card {
+      flex: 0 0 auto;
     }
 
     .pack-steps-preview {
@@ -964,7 +990,7 @@
       </div>
     </div>
 
-    <div style="display:flex; flex-direction:column; gap:12px; min-height:0;">
+    <div class="right-column">
       <div class="card instruction-card">
         <div>
           <div class="card-title">Текущая команда</div>
@@ -1052,10 +1078,14 @@
         </div>
       </div>
 
+<<<<<<< HEAD
 
       <div class="card steps-card" style="flex:0.5; min-height:0;">
 
       <div class="card" id="shiftPlanCard">
+=======
+      <div class="card shift-plan-card" id="shiftPlanCard">
+>>>>>>> 3b7f80358a106710bc1525297817c6ef55d5a939
         <div class="card-title">Сменное задание</div>
         <div class="pack-meta" id="shiftPlanName">План не выбран</div>
         <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
