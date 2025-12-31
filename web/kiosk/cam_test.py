@@ -1,3 +1,16 @@
+"""
+Скрипт ручной проверки RTSP-потока.
+ВАЖНО: это не pytest-тест. При импорте в pytest — сразу пропускаем,
+потому что в CI нет камеры и системных библиотек для OpenCV.
+"""
+
+if __name__ != "__main__":
+    # pytest будет импортировать *_test.py модули.
+    # Чтобы не падать на импорте cv2 и не зависеть от камеры — пропускаем.
+    import pytest
+
+    pytest.skip("RTSP/OpenCV скрипт пропущен в тестах", allow_module_level=True)
+
 import cv2
 
 url = "rtsp://admin:QsD4Fv%216@192.168.31.64:554/Streaming/Channels/102"
