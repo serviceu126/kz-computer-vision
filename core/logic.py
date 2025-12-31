@@ -323,7 +323,7 @@ class KioskEngine:
             # чтобы packed_count считался по events (без ручных счётчиков).
             if status == "done":
                 add_event(
-                    type="PACKED_CONFIRMED",
+                    event_type="PACKED_CONFIRMED",
                     ts=self._session.finish_time or time.time(),
                     shift_id=getattr(self._session, "shift_id", None),
                     session_id=session_id or None,
@@ -374,7 +374,7 @@ class KioskEngine:
         # Это нужно для корректного packed_count в отчётах по смене.
         if status == "done":
             add_event(
-                type="PACKED_CONFIRMED",
+                event_type="PACKED_CONFIRMED",
                 ts=self._session.finish_time or time.time(),
                 shift_id=getattr(self._session, "shift_id", None),
                 session_id=session_id or None,

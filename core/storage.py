@@ -153,60 +153,6 @@ def add_event(
     return int(event_id or 0)
 
 
-def add_event(
-    event_type: str,
-    ts: float,
-    payload_json: str = "",
-    shift_id: int | None = None,
-    session_id: int | None = None,
-    worker_id: str | None = None,
-) -> int:
-    """
-    Добавляем событие в events.
-    - Что делаем: записываем тип события и время (ts).
-    - Зачем: события нужны для вычисления work/idle и heartbeat-авто-idle.
-    - Как использовать: вызовы из /api/kiosk/timer/state и /api/kiosk/timer/heartbeat.
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        [ts, event_type, payload_json or "", shift_id, session_id, worker_id],
-    )
-    event_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return int(event_id or 0)
-
-
-def add_event(
-    event_type: str,
-    ts: float,
-    payload_json: str = "",
-    shift_id: int | None = None,
-    session_id: int | None = None,
-    worker_id: str | None = None,
-) -> int:
-    """
-    Добавляем событие в events.
-    - Что делаем: записываем тип события и время (ts).
-    - Зачем: события нужны для вычисления work/idle и heartbeat-авто-idle.
-    - Как использовать: вызовы из /api/kiosk/timer/state и /api/kiosk/timer/heartbeat.
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        [ts, event_type, payload_json or "", shift_id, session_id, worker_id],
-    )
-    event_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return int(event_id or 0)
-
-
 def start_worker_shift(worker_id: str, work_center: str) -> int:
     """Открывает смену сотрудника на указанном РЦ и возвращает shift_id."""
     """Открывает смену сотрудника на указанном РЦ. Возвращает ID новой смены."""
@@ -393,34 +339,6 @@ def count_sessions_since(start_time: float, worker_id: str | None = None) -> int
     conn.close()
     return int(row["cnt"] if row else 0)
 
-
-def add_event(
-    type: str,
-    ts: float,
-    payload_json: str = "",
-    shift_id: int | None = None,
-    session_id: int | None = None,
-    worker_id: str | None = None,
-) -> int:
-    
-    """Добавляем событие в events.
-    - Что делаем: пишем строку в events с типом и временем.
-    - Зачем: фиксируем факт (например PACKED_CONFIRMED), чтобы потом считать метрики
-      через COUNT/агрегации, а не вручную пересчитывать сессии.
-    - Как влияет на метрики: packed_count = COUNT(type='PACKED_CONFIRMED').
-    - Тестирование (curl):
-     # 1) POST /api/kiosk/session/finish {"status":"done"}
-     # 2) GET  /api/kiosk/report/shift?shift_id=...
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute( """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id),VALUES (?, ?, ?, ?, ?, ?)""",
-        [ts, type, payload_json or "", shift_id, session_id, worker_id],
-    )
-    event_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return int(event_id or 0)
 
 
 def get_shift_report(shift_id: int) -> dict:
