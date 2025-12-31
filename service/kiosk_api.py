@@ -102,6 +102,13 @@ class ShiftWorkerRequest(BaseModel):
     work_center: Optional[str] = None  # УПАКОВКА / УКОМПЛЕКТОВКА
 
 
+class ShiftStartRequest(BaseModel):
+    # Явная схема для старта смены.
+    # Нужна, чтобы API возвращал shift_id (идентификатор открытой смены).
+    worker_id: str
+    work_center: str
+
+
 class ShiftEndRequest(BaseModel):
     worker_id: str
     work_centers: Optional[List[str]] = None  # если не задано — закрыть все
@@ -236,10 +243,10 @@ async def shift_add(payload: ShiftWorkerRequest):
 
 
 @app.post("/api/kiosk/shift/start")
-async def shift_start(payload: ShiftWorkerRequest):
-    # Новый API-метод для явного старта смены на РЦ.
-    # Возвращаем shift_id, чтобы фронт мог связать сессию упаковки со сменой.
-    shift_id = engine.add_worker_to_shift(worker_id=payload.worker_id, work_center=payload.work_center or "")
+async def shift_start(payload: ShiftStartRequest):
+    # Новый эндпоинт старта смены.
+    # Возвращаем shift_id, чтобы фронт/интеграции могли связать события со сменой.
+    shift_id = engine.add_worker_to_shift(worker_id=payload.worker_id, work_center=payload.work_center)
     return {"status": "ok", "shift_id": shift_id}
 
 
