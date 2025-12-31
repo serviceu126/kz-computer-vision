@@ -11,15 +11,6 @@ from core.logic import engine, KioskUIState
 from core.storage import get_conn
 from services.timers import record_timer_state, record_heartbeat
 
-from core.storage import get_conn
-from services.timers import record_timer_state, record_heartbeat
-
-from core.storage import get_shift_report
-
-from core.storage import get_conn
-from services.timers import record_timer_state, record_heartbeat
-
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 KIOSK_DIR = BASE_DIR / "web" / "kiosk"
 INDEX_FILE = KIOSK_DIR / "index.html"
@@ -289,6 +280,8 @@ async def timer_state(payload: TimerStateRequest):
             detail="Смена уже закрыта, таймер не может менять состояние.",
         )
 
+    # session_id здесь не используем: сессия сохраняется в БД только при finish,
+    # а источником истины для таймера остаётся shift_id.
     created = record_timer_state(
         shift_id=shift_id,
         session_id=None,
@@ -323,6 +316,8 @@ async def timer_heartbeat(payload: TimerHeartbeatRequest):
             detail="Смена уже закрыта, heartbeat не записывается.",
         )
 
+    # session_id здесь также не используется по той же причине:
+    # события таймера привязываются к смене (shift_id).
     record_heartbeat(
         shift_id=shift_id,
         session_id=None,
