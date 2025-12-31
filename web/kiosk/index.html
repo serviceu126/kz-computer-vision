@@ -200,7 +200,7 @@
 
     .middle {
       display: grid;
-      grid-template-columns: 2.2fr 1.6fr;
+      grid-template-columns: 3.2fr 1fr;
       gap: 16px;
       flex: 1;
       min-height: 0;
@@ -539,11 +539,20 @@
       box-shadow: none;
     }
 
+    .action-pill.manual-pill {
+      opacity: 0.78;
+      border-color: rgba(148, 163, 184, 0.4);
+      background: rgba(15, 23, 42, 0.35);
+    }
+
     .pack-card {
       padding: 14px 18px;
       display: flex;
       flex-direction: column;
       gap: 12px;
+      width: 52%;
+      min-width: 280px;
+      align-self: flex-start;
     }
 
     .pack-row {
@@ -901,33 +910,34 @@
             <div class="pack-meta" id="packStepSummary">Шаг — из —</div>
             <div class="pack-meta" id="packCurrentStep">Текущий шаг: —</div>
             <div class="pack-meta" id="packFlags">Доступно: —</div>
+            <div class="pack-meta">Ручной режим: кнопки предназначены только для супервайзера.</div>
           </div>
         </div>
 
         <div class="action-row" style="justify-content:flex-start;">
-          <div id="btnPackStart" class="action-pill" role="button" tabindex="0">
+          <div id="btnPackStart" class="action-pill manual-pill" role="button" tabindex="0">
             <span class="dot"></span>
-            <span>Start SKU</span>
+            <span>Старт SKU (ручной режим)</span>
           </div>
-          <div id="btnPackStepComplete" class="action-pill" role="button" tabindex="0">
+          <div id="btnPackStepComplete" class="action-pill manual-pill" role="button" tabindex="0">
             <span class="dot"></span>
-            <span>Step complete</span>
+            <span>Шаг выполнен (ручной режим)</span>
           </div>
-          <div id="btnPackPhaseNext" class="action-pill" role="button" tabindex="0">
+          <div id="btnPackPhaseNext" class="action-pill manual-pill" role="button" tabindex="0">
             <span class="dot"></span>
-            <span>Next phase</span>
+            <span>Следующая фаза (ручной режим)</span>
           </div>
-          <div id="btnPackCloseBox" class="action-pill" role="button" tabindex="0">
+          <div id="btnPackCloseBox" class="action-pill manual-pill" role="button" tabindex="0">
             <span class="dot"></span>
-            <span>Close box</span>
+            <span>Закрыть коробку (ручной режим)</span>
           </div>
-          <div id="btnPackPrintLabel" class="action-pill" role="button" tabindex="0">
+          <div id="btnPackPrintLabel" class="action-pill manual-pill" role="button" tabindex="0">
             <span class="dot"></span>
-            <span>Print label</span>
+            <span>Печать этикетки (ручной режим)</span>
           </div>
-          <div id="btnPackTableEmpty" class="action-pill" role="button" tabindex="0">
+          <div id="btnPackTableEmpty" class="action-pill manual-pill" role="button" tabindex="0">
             <span class="dot"></span>
-            <span>Table empty</span>
+            <span>Стол пустой (ручной режим)</span>
           </div>
         </div>
 
@@ -1424,8 +1434,19 @@ document.getElementById("bedDetails").textContent =
 
     const active = packUiState && packUiState.active_session;
     const state = packUiState && packUiState.pack_state;
-    label.textContent = "Состояние: " + (state || "—");
-    phaseLabel.textContent = "Фаза: " + (active && active.phase ? active.phase : "—");
+    const phase = active && active.phase ? active.phase : null;
+    const stateMap = {
+      started: "в работе",
+      box_closed: "коробка закрыта",
+      label_printed: "этикетка напечатана",
+      table_empty: "стол пустой",
+    };
+    const phaseMap = {
+      LAYOUT: "выкладка",
+      PACKING: "упаковка",
+    };
+    label.textContent = "Состояние: " + (stateMap[state] || "—");
+    phaseLabel.textContent = "Фаза: " + (phaseMap[phase] || "—");
 
     const canStart = packUiState && packUiState.can_start_sku;
     const canClose = packUiState && packUiState.can_close_box;
@@ -1434,10 +1455,10 @@ document.getElementById("bedDetails").textContent =
 
     if (flagsLabel) {
       const flagText = [
-        `Start SKU: ${canStart ? "да" : "нет"}`,
-        `Close box: ${canClose ? "да" : "нет"}`,
-        `Print label: ${canPrint ? "да" : "нет"}`,
-        `Table empty: ${canTableEmpty ? "да" : "нет"}`,
+        `Старт SKU: ${canStart ? "да" : "нет"}`,
+        `Закрыть коробку: ${canClose ? "да" : "нет"}`,
+        `Печать этикетки: ${canPrint ? "да" : "нет"}`,
+        `Стол пустой: ${canTableEmpty ? "да" : "нет"}`,
       ];
       flagsLabel.textContent = "Доступно: " + flagText.join(" • ");
     }
