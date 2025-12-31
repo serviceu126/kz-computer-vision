@@ -563,8 +563,63 @@
       justify-content: space-between;
     }
 
+    .pack-main {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .pack-state-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.6);
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
     .pack-meta {
       font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .pack-current-step {
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border-soft);
+      background: rgba(2, 6, 23, 0.55);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .pack-current-step-title {
+      font-size: 13px;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .pack-current-step-value {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .pack-available {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .pack-manual-note {
+      border-radius: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(15, 23, 42, 0.4);
+      padding: 8px 10px;
+      font-size: 12px;
       color: var(--text-muted);
     }
 
@@ -899,19 +954,25 @@
       <div class="card pack-card">
         <div class="card-title">Упаковка</div>
         <div class="pack-row">
-          <div>
-            <div class="card-main" style="gap:10px;">
-              <span id="packStateLabel">Состояние: —</span>
-              <span class="badge">
-                <span class="dot"></span>
-                <span id="packPhaseLabel">Фаза: —</span>
-              </span>
-            </div>
-            <div class="pack-meta" id="packStepSummary">Шаг — из —</div>
-            <div class="pack-meta" id="packCurrentStep">Текущий шаг: —</div>
-            <div class="pack-meta" id="packFlags">Доступно: —</div>
-            <div class="pack-meta">Ручной режим: кнопки предназначены только для супервайзера.</div>
+          <div class="pack-main" id="packStateLabel">Состояние: —</div>
+          <div class="pack-state-chip">
+            <span class="dot"></span>
+            <span id="packPhaseLabel">Фаза: —</span>
           </div>
+        </div>
+
+        <div class="pack-current-step">
+          <div class="pack-current-step-title">Текущий шаг</div>
+          <div class="pack-current-step-value" id="packCurrentStep">—</div>
+        </div>
+
+        <div class="pack-available" id="packFlags">
+          <div>Доступно:</div>
+          <div>• —</div>
+        </div>
+
+        <div class="pack-manual-note">
+          <strong>Ручной режим:</strong> кнопки ниже предназначены только для супервайзера.
         </div>
 
         <div class="action-row" style="justify-content:flex-start;">
@@ -945,7 +1006,7 @@
           <div class="card-title" style="margin-bottom:6px;">Ближайшие шаги</div>
           <div class="pack-steps-preview" id="packPlanPreview">
             <div class="pack-step-line">
-              <span>—</span>
+              <span>План выкладки будет загружен автоматически</span>
               <span>—</span>
             </div>
           </div>
@@ -1436,10 +1497,10 @@ document.getElementById("bedDetails").textContent =
     const state = packUiState && packUiState.pack_state;
     const phase = active && active.phase ? active.phase : null;
     const stateMap = {
-      started: "в работе",
-      box_closed: "коробка закрыта",
-      label_printed: "этикетка напечатана",
-      table_empty: "стол пустой",
+      started: "В РАБОТЕ",
+      box_closed: "КОРОБКА ЗАКРЫТА",
+      label_printed: "ЭТИКЕТКА НАПЕЧАТАНА",
+      table_empty: "СТОЛ ПУСТОЙ",
     };
     const phaseMap = {
       LAYOUT: "выкладка",
@@ -1454,13 +1515,17 @@ document.getElementById("bedDetails").textContent =
     const canTableEmpty = packUiState && packUiState.can_mark_table_empty;
 
     if (flagsLabel) {
-      const flagText = [
-        `Старт SKU: ${canStart ? "да" : "нет"}`,
-        `Закрыть коробку: ${canClose ? "да" : "нет"}`,
-        `Печать этикетки: ${canPrint ? "да" : "нет"}`,
-        `Стол пустой: ${canTableEmpty ? "да" : "нет"}`,
-      ];
-      flagsLabel.textContent = "Доступно: " + flagText.join(" • ");
+      const available = [];
+      if (canStart) available.push("Старт SKU");
+      if (canClose) available.push("Закрыть коробку");
+      if (canPrint) available.push("Печать этикетки");
+      if (canTableEmpty) available.push("Стол пустой");
+
+      const lines = available.length ? available : ["—"];
+      flagsLabel.innerHTML = `
+        <div>Доступно:</div>
+        ${lines.map(item => `<div>• ${item}</div>`).join("")}
+      `;
     }
 
     setActionPillDisabled(btnPackStart, !canStart);
@@ -1475,31 +1540,25 @@ document.getElementById("bedDetails").textContent =
 
   function renderPackStepsState() {
     // Сводка шага и текущая операция берутся из backend, чтобы UI не ошибся с логикой.
-    const summary = document.getElementById("packStepSummary");
     const currentStep = document.getElementById("packCurrentStep");
-    if (!summary || !currentStep) return;
+    if (!currentStep) return;
 
     if (!packStepsState || !packStepsState.phase) {
-      summary.textContent = "Шаг — из —";
-      currentStep.textContent = "Текущий шаг: —";
+      currentStep.textContent = "—";
       return;
     }
-
-    summary.textContent =
-      "Шаг " + (packStepsState.current_step_index + 1) +
-      " из " + (packStepsState.total_steps || 0);
 
     const step = packStepsState.current_step;
     if (!step) {
-      currentStep.textContent = "Текущий шаг: —";
+      currentStep.textContent = "—";
       return;
     }
-    currentStep.textContent =
-      "Текущий шаг: " + step.slot + " / " + step.part_code;
+    currentStep.textContent = step.slot + " — " + step.part_code;
   }
 
   function renderPackPlanPreview() {
-    // Показываем 3–5 ближайших шагов, чтобы оператор видел "что дальше".
+    // Показываем 1–2 ближайших шага, чтобы оператор видел "что дальше",
+    // но не утопал в длинном списке и не терял фокус на текущей операции.
     // План не меняем локально, просто читаем его из backend и подсвечиваем текущий шаг.
     const list = document.getElementById("packPlanPreview");
     if (!list) return;
@@ -1512,13 +1571,13 @@ document.getElementById("bedDetails").textContent =
     if (!packPlan.length || !phase) {
       const empty = document.createElement("div");
       empty.className = "pack-step-line";
-      empty.innerHTML = "<span>План не загружен</span><span>—</span>";
+      empty.innerHTML = "<span>План выкладки будет загружен автоматически</span><span>—</span>";
       list.appendChild(empty);
       return;
     }
 
     const phaseSteps = packPlan.filter(step => step.phase === phase);
-    const preview = phaseSteps.slice(currentIndex, currentIndex + 5);
+    const preview = phaseSteps.slice(currentIndex, currentIndex + 2);
     preview.forEach((step, idx) => {
       const row = document.createElement("div");
       row.className = "pack-step-line";
