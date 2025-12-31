@@ -9,14 +9,17 @@ from pydantic import BaseModel
 
 from core.logic import engine, KioskUIState
 from core.storage import get_conn
-from services.timers import record_timer_state, record_heartbeat
-
-from core.storage import get_conn
-from services.timers import record_timer_state, record_heartbeat
-
-from core.storage import get_shift_report
-
-from core.storage import get_conn
+from services.packaging import (
+    apply_event,
+    compute_pack_ui_flags,
+    get_active_session as get_pack_active_session,
+    get_state as get_pack_state,
+    start_session as start_pack_session,
+    EVENT_CLOSE_BOX,
+    EVENT_PRINT_LABEL,
+    EVENT_TABLE_EMPTY,
+    PackagingTransitionError,
+)
 from services.timers import record_timer_state, record_heartbeat
 
 
@@ -130,6 +133,10 @@ class TimerStateRequest(BaseModel):
 
 class TimerHeartbeatRequest(BaseModel):
     source: Optional[str] = "kiosk"
+
+
+class PackStartRequest(BaseModel):
+    sku: str
 
 
 app = FastAPI(title="KZ Kiosk API")
@@ -331,6 +338,58 @@ async def timer_heartbeat(payload: TimerHeartbeatRequest):
         source=payload.source,
     )
     return {"status": "ok"}
+
+
+@app.post("/api/kiosk/pack/start")
+async def pack_start(payload: PackStartRequest):
+    try:
+        state = start_pack_session(payload.sku)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.post("/api/kiosk/pack/table-empty")
+async def pack_table_empty():
+    try:
+        state = apply_event(EVENT_TABLE_EMPTY)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.post("/api/kiosk/pack/close-box")
+async def pack_close_box():
+    try:
+        state = apply_event(EVENT_CLOSE_BOX)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.post("/api/kiosk/pack/print-label")
+async def pack_print_label():
+    try:
+        state = apply_event(EVENT_PRINT_LABEL)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.get("/api/kiosk/pack/state")
+async def pack_state():
+    return {"status": "ok", "state": get_pack_state()}
+
+
+@app.get("/api/kiosk/pack/ui-state")
+async def pack_ui_state():
+    active_session = get_pack_active_session()
+    flags = compute_pack_ui_flags(active_session)
+    return {
+        "active_session": active_session,
+        "pack_state": active_session["state"] if active_session else None,
+        **flags,
+    }
 
 
 if __name__ == "__main__":
