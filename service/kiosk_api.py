@@ -8,8 +8,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.logic import engine, KioskUIState
+<<<<<<< HEAD
 from core.storage import get_conn
 from services.timers import record_timer_state, record_heartbeat
+=======
+from core.storage import get_shift_report
+>>>>>>> main
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 KIOSK_DIR = BASE_DIR / "web" / "kiosk"
@@ -100,6 +104,13 @@ class FinishSessionRequest(BaseModel):
 class ShiftWorkerRequest(BaseModel):
     worker_id: str
     work_center: Optional[str] = None  # УПАКОВКА / УКОМПЛЕКТОВКА
+
+
+class ShiftStartRequest(BaseModel):
+    # Явная схема для старта смены.
+    # Нужна, чтобы API возвращал shift_id (идентификатор открытой смены).
+    worker_id: str
+    work_center: str
 
 
 class ShiftEndRequest(BaseModel):
@@ -236,10 +247,17 @@ async def shift_add(payload: ShiftWorkerRequest):
 
 
 @app.post("/api/kiosk/shift/start")
+<<<<<<< HEAD
+async def shift_start(payload: ShiftStartRequest):
+    # Новый эндпоинт старта смены.
+    # Возвращаем shift_id, чтобы фронт/интеграции могли связать события со сменой.
+    shift_id = engine.add_worker_to_shift(worker_id=payload.worker_id, work_center=payload.work_center)
+=======
 async def shift_start(payload: ShiftWorkerRequest):
     # Новый API-метод для явного старта смены на РЦ.
     # Возвращаем shift_id, чтобы фронт мог связать сессию упаковки со сменой.
     shift_id = engine.add_worker_to_shift(worker_id=payload.worker_id, work_center=payload.work_center or "")
+>>>>>>> main
     return {"status": "ok", "shift_id": shift_id}
 
 
@@ -249,6 +267,7 @@ async def shift_end(payload: ShiftEndRequest):
     return {"status": "ok", "closed": closed}
 
 
+<<<<<<< HEAD
 @app.post("/api/kiosk/timer/state")
 async def timer_state(payload: TimerStateRequest):
     # Смена состояния таймера work/idle.
@@ -315,6 +334,16 @@ async def timer_heartbeat(payload: TimerHeartbeatRequest):
         source=payload.source,
     )
     return {"status": "ok"}
+=======
+@app.get("/api/kiosk/report/shift")
+async def get_shift_report_api(shift_id: int):
+    # Минимальный отчёт по смене.
+    # Что делаем: отдаём агрегаты из get_shift_report (events + sessions).
+    # Зачем: это быстрый способ проверить packed_count и work/idle.
+    # Как тестировать (curl):
+    #   curl -s "http://127.0.0.1:8000/api/kiosk/report/shift?shift_id=1"
+    return get_shift_report(shift_id)
+>>>>>>> main
 
 
 if __name__ == "__main__":

@@ -13,6 +13,10 @@ from core.storage import (
     get_active_shifts,
     get_latest_active_shift_id,
     count_sessions_since,
+<<<<<<< HEAD
+=======
+    add_event,
+>>>>>>> main
 )
 from services.timers import compute_work_idle_seconds, get_heartbeat_age_sec
 from core.voice import say
@@ -177,9 +181,14 @@ class KioskEngine:
         wc = (work_center or "").strip().upper()
         if not wid or not wc:
             return 0
+<<<<<<< HEAD
+        # ВАЖНО: start_worker_shift возвращает shift_id.
+        # Это нужно для API /api/kiosk/shift/start, чтобы отдать идентификатор смены.
+=======
 
         # Запускаем смену и получаем её ID,
         # чтобы при необходимости вернуть его в API.
+>>>>>>> main
         shift_id = start_worker_shift(wid, wc)
         self._active_shifts_cache = get_active_shifts()
 
@@ -259,6 +268,9 @@ class KioskEngine:
                 bed_title = "Кровать " + code
             if not bed_details:
                 bed_details = "Размер — | Цвет — | Вид —"
+        # ВАЖНО: смена может быть не открыта.
+        # В этом случае shift_id будет None, и это допустимо для таблицы sessions.
+        shift_id = get_latest_active_shift_id(worker_id)
         with self._lock:
             self._session = PackSession(
                 worker_id=worker_id,
@@ -266,8 +278,14 @@ class KioskEngine:
                 start_time=time.time(),
                 status="running",
             )
+<<<<<<< HEAD
+            # Привязываем сессию к активной смене (если она есть).
+            # Мы не добавляем поле в PackSession, а используем динамический атрибут,
+            # чтобы не менять отдельный файл core/session.py.
+=======
             # Сохраняем shift_id прямо в объекте сессии,
             # чтобы при записи в БД сохранить привязку к смене.
+>>>>>>> main
             self._session.shift_id = shift_id
             self._session_start_ts = self._session.start_time
 
@@ -287,7 +305,18 @@ class KioskEngine:
                 return
 
             self._session.finish(status=status)
-            save_session(self._session)
+            session_id = save_session(self._session)
+
+            # Если упаковка завершилась успешно, фиксируем событие,
+            # чтобы packed_count считался по events (без ручных счётчиков).
+            if status == "done":
+                add_event(
+                    type="PACKED_CONFIRMED",
+                    ts=self._session.finish_time or time.time(),
+                    shift_id=getattr(self._session, "shift_id", None),
+                    session_id=session_id or None,
+                    worker_id=self._session.worker_id,
+                )
 
             total_sec = int(self._session.worktime_sec + self._session.downtime_sec)
             sku = self._session.product_code
@@ -327,7 +356,18 @@ class KioskEngine:
         self._session.finish(status=status)
 
         # 2) сохраняем в базу
-        save_session(self._session)
+        session_id = save_session(self._session)
+
+        # Если упаковка завершилась успешно, пишем событие в events.
+        # Это нужно для корректного packed_count в отчётах по смене.
+        if status == "done":
+            add_event(
+                type="PACKED_CONFIRMED",
+                ts=self._session.finish_time or time.time(),
+                shift_id=getattr(self._session, "shift_id", None),
+                session_id=session_id or None,
+                worker_id=self._session.worker_id,
+            )
 
         # 3) считаем время (работа+простой), чтобы обновить "последнее / лучшее / среднее"
         total_sec = int(self._session.worktime_sec + self._session.downtime_sec)
@@ -525,8 +565,12 @@ class KioskEngine:
 
             # есть активная сессия
             sess = self._session
-            elapsed = now - sess.start_time
+            # На каждом запросе /state безопасно обновляем таймеры.
+            # Это устраняет "зависания" и отрицательные/скачущие значения.
+            sess._update_timers(now, idle_threshold=5.0)
             status = sess.status
+            work_sec = int(sess.worktime_sec)
+            idle_sec = int(sess.downtime_sec)
 
             current_step_index, completed_steps, steps, slots = self._build_steps_and_slots(now)
             events = self._build_events(now, completed_steps)
@@ -591,6 +635,7 @@ class KioskEngine:
                 )
 
 
+<<<<<<< HEAD
             work_sec = int(sess.worktime_sec)
             idle_sec = int(sess.downtime_sec)
 
@@ -604,6 +649,8 @@ class KioskEngine:
                 work_sec = work_seconds
                 idle_sec = idle_seconds
 
+=======
+>>>>>>> main
             sku = sess.product_code
             last_pack = self._last_pack_per_sku.get(sku, 0)
             best_pack = self._best_pack_per_sku.get(sku, 0)
