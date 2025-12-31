@@ -102,3 +102,56 @@ def test_packaging_table_empty_gate_for_next_sku(tmp_path, monkeypatch):
 
     res_start_ok = client.post("/api/kiosk/pack/start", json={"sku": "SKU-7"})
     assert res_start_ok.status_code == 200
+
+
+def test_packaging_steps_happy_path(tmp_path, monkeypatch):
+    _setup_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    res_start = client.post("/api/kiosk/pack/start", json={"sku": "SKU-1"})
+    assert res_start.status_code == 200
+
+    res_plan = client.get("/api/kiosk/pack/plan")
+    assert res_plan.status_code == 200
+    steps = res_plan.json()["steps"]
+    layout_steps = [step for step in steps if step["phase"] == "LAYOUT"]
+    packing_steps = [step for step in steps if step["phase"] == "PACKING"]
+
+    for _ in layout_steps:
+        res_complete = client.post("/api/kiosk/pack/step/complete")
+        assert res_complete.status_code == 200
+
+    res_phase = client.post("/api/kiosk/pack/phase/next")
+    assert res_phase.status_code == 200
+
+    for _ in packing_steps:
+        res_complete = client.post("/api/kiosk/pack/step/complete")
+        assert res_complete.status_code == 200
+
+    res_close = client.post("/api/kiosk/pack/close-box")
+    assert res_close.status_code == 200
+
+    res_print = client.post("/api/kiosk/pack/print-label")
+    assert res_print.status_code == 200
+
+    res_table = client.post("/api/kiosk/pack/table-empty")
+    assert res_table.status_code == 200
+
+
+def test_packaging_phase_next_requires_layout_complete(tmp_path, monkeypatch):
+    _setup_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    res_start = client.post("/api/kiosk/pack/start", json={"sku": "SKU-1"})
+    assert res_start.status_code == 200
+
+    res_phase = client.post("/api/kiosk/pack/phase/next")
+    assert res_phase.status_code == 409
+
+
+def test_packaging_complete_step_without_session(tmp_path, monkeypatch):
+    _setup_db(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    res_complete = client.post("/api/kiosk/pack/step/complete")
+    assert res_complete.status_code == 409

@@ -91,7 +91,10 @@ def init_db():
         end_time REAL,
         state TEXT NOT NULL,
         shift_id INTEGER,
-        worker_id TEXT
+        worker_id TEXT,
+        phase TEXT,
+        current_step_index INTEGER,
+        total_steps INTEGER
     )
     """)
 
@@ -101,6 +104,12 @@ def init_db():
         cur.execute("ALTER TABLE pack_sessions ADD COLUMN shift_id INTEGER")
     if "worker_id" not in pack_columns:
         cur.execute("ALTER TABLE pack_sessions ADD COLUMN worker_id TEXT")
+    if "phase" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN phase TEXT")
+    if "current_step_index" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN current_step_index INTEGER")
+    if "total_steps" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN total_steps INTEGER")
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS pack_events (
@@ -189,13 +198,19 @@ def create_pack_session(
     state: str,
     shift_id: int | None = None,
     worker_id: str | None = None,
+    phase: str | None = None,
+    current_step_index: int | None = None,
+    total_steps: int | None = None,
 ) -> int:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        """INSERT INTO pack_sessions(sku, start_time, end_time, state, shift_id, worker_id)
-           VALUES (?, ?, NULL, ?, ?, ?)""",
-        [sku, ts, state, shift_id, worker_id],
+        """INSERT INTO pack_sessions(
+               sku, start_time, end_time, state, shift_id, worker_id,
+               phase, current_step_index, total_steps
+           )
+           VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)""",
+        [sku, ts, state, shift_id, worker_id, phase, current_step_index, total_steps],
     )
     session_id = cur.lastrowid
     conn.commit()
@@ -220,6 +235,24 @@ def update_pack_session_state(session_id: int, state: str, end_time: float | Non
                WHERE id=?""",
             [state, end_time, session_id],
         )
+    conn.commit()
+    conn.close()
+
+
+def update_pack_session_progress(
+    session_id: int,
+    phase: str,
+    current_step_index: int,
+    total_steps: int,
+) -> None:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE pack_sessions
+           SET phase=?, current_step_index=?, total_steps=?
+           WHERE id=?""",
+        [phase, current_step_index, total_steps, session_id],
+    )
     conn.commit()
     conn.close()
 
