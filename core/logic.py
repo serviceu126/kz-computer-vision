@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 import threading
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional
@@ -13,6 +14,7 @@ from core.storage import (
     get_latest_active_shift_id,
     count_sessions_since,
 )
+from services.timers import compute_work_idle_seconds, get_heartbeat_age_sec
 from core.voice import say
 from core.beds_catalog import get_bed_info
 # from core.detector import Detector  # подключим, когда будем работать с видео
@@ -71,6 +73,14 @@ class KioskUIState:
     started_at_epoch: Optional[float]
     work_seconds: int
     idle_seconds: int
+    # Таймерные поля на основе событий:
+    # timer_state: текущее состояние таймера (work/idle/None)
+    # work_minutes/idle_minutes: округление вниз до минут
+    # heartbeat_age_sec: возраст последнего heartbeat (секунды) или None
+    timer_state: Optional[str]
+    work_minutes: int
+    idle_minutes: int
+    heartbeat_age_sec: Optional[int]
 
     last_pack_seconds: int
     best_pack_seconds: int
@@ -185,6 +195,17 @@ class KioskEngine:
         n = end_worker_shift(wid, work_centers=work_centers)
         self._active_shifts_cache = get_active_shifts()
         return n
+
+    def get_active_session_shift_context(self) -> tuple[int | None, str | None]:
+        """
+        Возвращаем (shift_id, worker_id) для активной упаковочной сессии.
+        - Это нужно для эндпоинтов таймера (state/heartbeat),
+          чтобы корректно привязать событие к смене.
+        """
+        with self._lock:
+            if not self._session:
+                return None, None
+            return getattr(self._session, "shift_id", None), self._session.worker_id
 
     def set_bed(self, product_code: str) -> None:
         code = self._normalize_scan(product_code)
@@ -441,6 +462,32 @@ class KioskEngine:
                 self._active_shifts_cache = getattr(self, "_active_shifts_cache", [])
 
             shift_active = len(self._active_shifts_cache) > 0
+            # Для расчёта таймера используем shift_id активной сессии,
+            # либо первую активную смену из списка (минимальный fallback).
+            shift_id_for_timer = None
+            if self._session and getattr(self._session, "shift_id", None):
+                shift_id_for_timer = self._session.shift_id
+            elif self._active_shifts_cache:
+                shift_id_for_timer = self._active_shifts_cache[0].get("shift_id")
+
+            work_seconds = 0
+            idle_seconds = 0
+            timer_state = None
+            heartbeat_age_sec = None
+            if shift_id_for_timer:
+                # Используем единый timestamp специально, чтобы timer_state и
+                # heartbeat_age_sec считались из одной точки времени.
+                now_dt = datetime.utcnow()
+                work_seconds, idle_seconds, timer_state = compute_work_idle_seconds(
+                    shift_id_for_timer,
+                    now_dt,
+                )
+                heartbeat_age_sec = get_heartbeat_age_sec(
+                    shift_id_for_timer,
+                    now_dt,
+                )
+            work_minutes = int(work_seconds // 60)
+            idle_minutes = int(idle_seconds // 60)
 
             # нет активной сессии — показываем ожидание
             if not self._session:
@@ -457,8 +504,12 @@ class KioskEngine:
                     status="idle",
                     worker_state="idle",
                     started_at_epoch=None,
-                    work_seconds=0,
-                    idle_seconds=0,
+                    work_seconds=work_seconds,
+                    idle_seconds=idle_seconds,
+                    timer_state=timer_state,
+                    work_minutes=work_minutes,
+                    idle_minutes=idle_minutes,
+                    heartbeat_age_sec=heartbeat_age_sec,
                     last_pack_seconds=self._last_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
                     best_pack_seconds=self._best_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
                     avg_pack_seconds=self._avg_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
@@ -522,6 +573,10 @@ class KioskEngine:
                     started_at_epoch=None,          # таймер обнуляется
                     work_seconds=work_sec,          # оставляем посчитанное
                     idle_seconds=idle_sec,
+                    timer_state=timer_state,
+                    work_minutes=work_minutes,
+                    idle_minutes=idle_minutes,
+                    heartbeat_age_sec=heartbeat_age_sec,
                     last_pack_seconds=self._last_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
                     best_pack_seconds=self._best_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
                     avg_pack_seconds=self._avg_pack_per_sku.get(getattr(self, "_current_bed_sku", "—"), 0),
@@ -546,6 +601,12 @@ class KioskEngine:
             if status == "running":
                 work_sec += int(elapsed)
 
+            # Если есть события таймера, используем их как источник истины.
+            # Это обеспечивает расчёт work/idle на основе событий.
+            if timer_state is not None or work_seconds or idle_seconds:
+                work_sec = work_seconds
+                idle_sec = idle_seconds
+
             sku = sess.product_code
             last_pack = self._last_pack_per_sku.get(sku, 0)
             best_pack = self._best_pack_per_sku.get(sku, 0)
@@ -566,6 +627,10 @@ class KioskEngine:
                 started_at_epoch=sess.start_time,
                 work_seconds=work_sec,
                 idle_seconds=idle_sec,
+                timer_state=timer_state,
+                work_minutes=work_minutes,
+                idle_minutes=idle_minutes,
+                heartbeat_age_sec=heartbeat_age_sec,
                 last_pack_seconds=last_pack,
                 best_pack_seconds=best_pack,
                 avg_pack_seconds=avg_pack,
