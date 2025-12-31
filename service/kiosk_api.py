@@ -1,5 +1,7 @@
 from pathlib import Path
 from typing import List, Optional, Literal
+import time
+from fastapi import HTTPException
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -58,6 +60,9 @@ class KioskState(BaseModel):
 
     work_seconds: int
     idle_seconds: int
+    timer_state: Optional[str] = None
+    work_minutes: int = 0
+    idle_minutes: int = 0
 
     last_pack_seconds: int
     best_pack_seconds: int
@@ -100,6 +105,11 @@ class ShiftEndRequest(BaseModel):
     work_centers: Optional[List[str]] = None  # если не задано — закрыть все
 
 
+class TimerStateRequest(BaseModel):
+    state: Literal["work", "idle"]
+    reason: Optional[str] = None
+
+
 app = FastAPI(title="KZ Kiosk API")
 
 app.mount(
@@ -132,6 +142,9 @@ async def get_state():
         started_at_epoch=ui.started_at_epoch or 0.0,
         work_seconds=ui.work_seconds,
         idle_seconds=ui.idle_seconds,
+        timer_state=ui.timer_state,
+        work_minutes=ui.work_minutes,
+        idle_minutes=ui.idle_minutes,
         last_pack_seconds=ui.last_pack_seconds,
         best_pack_seconds=ui.best_pack_seconds,
         avg_pack_seconds=ui.avg_pack_seconds,
@@ -227,6 +240,50 @@ async def shift_start(payload: ShiftWorkerRequest):
 async def shift_end(payload: ShiftEndRequest):
     closed = engine.close_worker_shift(worker_id=payload.worker_id, work_centers=payload.work_centers)
     return {"status": "ok", "closed": closed}
+
+
+@app.post("/api/kiosk/timer/state")
+async def timer_state(payload: TimerStateRequest):
+    # Смена состояния таймера work/idle.
+    # Что делаем: определяем активную сессию и её shift_id.
+    # Если смена не активна — возвращаем 409 (конфликт состояния).
+    # Идемпотентность: если состояние уже такое же — не пишем событие.
+    shift_id, worker_id = engine.get_active_session_shift_context()
+    if not shift_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Нет активной смены для текущей упаковочной сессии.",
+        )
+
+    from services.timers import record_timer_state
+    from core.storage import get_conn
+
+    # Проверяем, что смена реально активна в БД.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT is_active FROM worker_shifts WHERE id=?""",
+        [shift_id],
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row or int(row["is_active"]) != 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Смена уже закрыта, таймер не может менять состояние.",
+        )
+
+    # session_id пока неизвестен (сессия сохраняется в БД только на finish),
+    # поэтому пишем NULL и опираемся на shift_id как основной ключ.
+    created = record_timer_state(
+        shift_id=shift_id,
+        session_id=None,
+        state=payload.state,
+        reason=payload.reason,
+        ts=time.time(),
+        worker_id=worker_id,
+    )
+    return {"status": "ok", "created": created}
 
 
 if __name__ == "__main__":

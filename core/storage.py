@@ -56,6 +56,22 @@ def init_db():
     ON worker_shifts(worker_id, is_active)
     """)
 
+    # Таблица событий (events) — минимальный журнал таймеров work/idle.
+    # Зачем нужна: хранит смену состояния таймера, чтобы позже посчитать
+    # рабочее/простой время по событиям, а не по "тикерам".
+    # Важно: CREATE TABLE IF NOT EXISTS — безопасная миграция без ломки существующих БД.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts REAL NOT NULL,
+        type TEXT NOT NULL,
+        payload_json TEXT,
+        shift_id INTEGER,
+        session_id INTEGER,
+        worker_id TEXT
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -86,6 +102,34 @@ def save_session(session):
 
     conn.commit()
     conn.close()
+
+
+def add_event(
+    event_type: str,
+    ts: float,
+    payload_json: str = "",
+    shift_id: int | None = None,
+    session_id: int | None = None,
+    worker_id: str | None = None,
+) -> int:
+    """
+    Добавляет событие в таблицу events.
+    - Что делает: пишет запись с типом события и временем (ts).
+    - Зачем: события нужны для вычисления work/idle на основе смены состояния,
+      а не на основе частых heartbeat-тикеров.
+    - Как использовать: вызывать при смене состояния таймера (WORK_STARTED/IDLE_STARTED).
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [ts, event_type, payload_json or "", shift_id, session_id, worker_id],
+    )
+    event_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(event_id or 0)
 
 
 def start_worker_shift(worker_id: str, work_center: str) -> int:
