@@ -347,6 +347,13 @@ async def timer_heartbeat(payload: TimerHeartbeatRequest):
 
 @app.post("/api/kiosk/pack/start")
 async def pack_start(payload: PackStartRequest):
+    """
+    Старт упаковочной сессии по SKU.
+
+    Важно:
+    - Бизнес-правила проверяются в сервисе packaging.
+    - Здесь мы только транслируем ошибки в HTTP 409.
+    """
     try:
         state = start_pack_session(payload.sku)
     except PackagingTransitionError as exc:
@@ -356,6 +363,12 @@ async def pack_start(payload: PackStartRequest):
 
 @app.post("/api/kiosk/pack/table-empty")
 async def pack_table_empty():
+    """
+    Подтверждает, что стол пустой.
+
+    Это обязательный gate перед стартом следующего SKU.
+    Мы не меняем FSM напрямую, а вызываем сервисный слой.
+    """
     try:
         state = apply_event(EVENT_TABLE_EMPTY)
     except PackagingTransitionError as exc:
@@ -365,6 +378,11 @@ async def pack_table_empty():
 
 @app.post("/api/kiosk/pack/close-box")
 async def pack_close_box():
+    """
+    Фиксирует закрытие коробки.
+
+    Разрешено только из состояния STARTED.
+    """
     try:
         state = apply_event(EVENT_CLOSE_BOX)
     except PackagingTransitionError as exc:
@@ -374,6 +392,11 @@ async def pack_close_box():
 
 @app.post("/api/kiosk/pack/print-label")
 async def pack_print_label():
+    """
+    Фиксирует печать этикетки.
+
+    Разрешено только после BOX_CLOSED.
+    """
     try:
         state = apply_event(EVENT_PRINT_LABEL)
     except PackagingTransitionError as exc:
@@ -383,11 +406,22 @@ async def pack_print_label():
 
 @app.get("/api/kiosk/pack/state")
 async def pack_state():
+    """
+    Возвращает компактное состояние упаковки.
+    Это вспомогательный endpoint, без расширенных флагов UI.
+    """
     return {"status": "ok", "state": get_pack_state()}
 
 
 @app.get("/api/kiosk/pack/ui-state")
 async def pack_ui_state():
+    """
+    Расширенное состояние упаковки для UI.
+
+    Важно:
+    - active_session показывает текущий SKU (если есть).
+    - pack_state/flags вычисляются из FSM, чтобы фронт не дублировал правила.
+    """
     active_session = get_pack_active_session()
     session_for_flags = active_session or get_pack_latest_session()
     flags = compute_pack_ui_flags(session_for_flags)
@@ -400,6 +434,11 @@ async def pack_ui_state():
 
 @app.get("/api/kiosk/pack/plan")
 async def pack_plan():
+    """
+    Возвращает план шагов для активного SKU.
+
+    План формируется сервисом и нужен UI для отображения прогресса.
+    """
     active_session = get_pack_active_session()
     if not active_session:
         raise HTTPException(status_code=409, detail="Нет активной упаковочной сессии.")
@@ -408,6 +447,10 @@ async def pack_plan():
 
 @app.get("/api/kiosk/pack/steps/state")
 async def pack_steps_state():
+    """
+    Возвращает состояние шагов (фаза, индекс, текущий шаг).
+    Это основная точка синхронизации UI и backend.
+    """
     active_session = get_pack_active_session()
     if not active_session:
         raise HTTPException(status_code=409, detail="Нет активной упаковочной сессии.")
@@ -416,6 +459,12 @@ async def pack_steps_state():
 
 @app.post("/api/kiosk/pack/step/complete")
 async def pack_step_complete():
+    """
+    Завершает текущий шаг упаковки.
+
+    Логика проверки и запись события живёт в сервисе,
+    здесь только транслируем результат.
+    """
     try:
         result = complete_current_step()
     except PackagingTransitionError as exc:
@@ -425,6 +474,11 @@ async def pack_step_complete():
 
 @app.post("/api/kiosk/pack/phase/next")
 async def pack_phase_next():
+    """
+    Переводит процесс из LAYOUT в PACKING.
+
+    Нельзя перейти, если есть незавершённые шаги LAYOUT.
+    """
     try:
         result = advance_phase()
     except PackagingTransitionError as exc:

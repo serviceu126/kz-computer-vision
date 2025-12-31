@@ -100,6 +100,9 @@ def init_db():
 
     cur.execute("PRAGMA table_info(pack_sessions)")
     pack_columns = [row["name"] for row in cur.fetchall()]
+    # Ниже — безопасная миграция: если база была создана ранее,
+    # мы добавляем недостающие колонки без изменения существующих данных.
+    # Это важно, чтобы не ломать рабочие станции при обновлении.
     if "shift_id" not in pack_columns:
         cur.execute("ALTER TABLE pack_sessions ADD COLUMN shift_id INTEGER")
     if "worker_id" not in pack_columns:
@@ -202,6 +205,9 @@ def create_pack_session(
     current_step_index: int | None = None,
     total_steps: int | None = None,
 ) -> int:
+    # Здесь мы сохраняем старт упаковки в БД.
+    # Важно фиксировать phase/current_step_index/total_steps сразу,
+    # чтобы UI мог корректно показывать прогресс даже после перезапуска сервиса.
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -219,6 +225,8 @@ def create_pack_session(
 
 
 def update_pack_session_state(session_id: int, state: str, end_time: float | None = None) -> None:
+    # Обновляет состояние FSM упаковки.
+    # end_time записываем только при TABLE_EMPTY, чтобы зафиксировать завершение SKU.
     conn = get_conn()
     cur = conn.cursor()
     if end_time is None:
@@ -245,6 +253,8 @@ def update_pack_session_progress(
     current_step_index: int,
     total_steps: int,
 ) -> None:
+    # Обновляет прогресс шагов.
+    # Это отдельная функция, чтобы логически отделить FSM-состояние от workflow-шагов.
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -264,6 +274,8 @@ def add_pack_event(
     payload_json: str = "",
     sku: str | None = None,
 ) -> int:
+    # Сохраняем событие упаковки.
+    # payload_json хранит подробности шага или перехода, чтобы не менять схему БД.
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -278,6 +290,7 @@ def add_pack_event(
 
 
 def get_pack_session(session_id: int) -> sqlite3.Row | None:
+    # Точное чтение сессии по ID — используется в отладке и сервисных сценариях.
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT * FROM pack_sessions WHERE id=?", [session_id])
@@ -287,6 +300,7 @@ def get_pack_session(session_id: int) -> sqlite3.Row | None:
 
 
 def get_latest_pack_session() -> sqlite3.Row | None:
+    # Берём последнюю сессию по id, чтобы восстановить контекст после перезапуска.
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT * FROM pack_sessions ORDER BY id DESC LIMIT 1")
@@ -296,6 +310,7 @@ def get_latest_pack_session() -> sqlite3.Row | None:
 
 
 def get_active_pack_session() -> sqlite3.Row | None:
+    # Активной считаем сессию в состояниях, где процесс ещё не завершён полностью.
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(

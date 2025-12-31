@@ -39,6 +39,14 @@ class PackagingTransitionError(ValueError):
 
 
 def _get_layout_stub(sku: str) -> list[dict]:
+    """
+    Возвращает учебный (stub) план выкладки по SKU.
+
+    Почему так:
+    - Реальный каталог SKU будет подключён позднее.
+    - Нам нужна предсказуемая структура шагов, чтобы отладить workflow.
+    - Структура содержит slot и part_code, чтобы фронт мог подсветить цель.
+    """
     catalog = {
         "SKU-1": [
             {"slot": "A1", "part_code": "PART-1"},
@@ -54,6 +62,14 @@ def _get_layout_stub(sku: str) -> list[dict]:
 
 
 def _build_plan(sku: str) -> dict:
+    """
+    Строит полный план упаковки: сначала LAYOUT, затем PACKING.
+
+    Инвариант:
+    - Шаги PACKING идут в обратном порядке относительно LAYOUT.
+    - Это важно, потому что физическая упаковка часто идёт "сверху вниз",
+      в зеркальном порядке относительно выкладки.
+    """
     layout = _get_layout_stub(sku)
     packing = list(reversed(layout))
     layout_steps = [
@@ -80,10 +96,24 @@ def _build_plan(sku: str) -> dict:
 
 
 def verify_step(step: dict, frame=None) -> str:
+    """
+    Заглушка валидации шага для будущего CV.
+
+    Зачем:
+    - Позволяет включить интерфейс проверки, не внедряя модель сейчас.
+    - Возвращаем "unknown", чтобы не блокировать поток.
+    - В будущем сюда можно подать frame и вернуть ok/fail.
+    """
     return "unknown"
 
 
 def get_state() -> dict:
+    """
+    Возвращает минимальное состояние упаковки для UI/логики.
+
+    Если активной сессии нет, отдаём последнюю, чтобы UI мог показать
+    "последнее состояние" и правильно рассчитать gate.
+    """
     active = storage.get_active_pack_session()
     if active:
         return {
@@ -102,6 +132,14 @@ def get_state() -> dict:
 
 
 def compute_pack_ui_flags(session: dict | None) -> dict:
+    """
+    Вычисляет UI-флаги строго из FSM.
+
+    Принцип:
+    - Фронт не должен дублировать правила переходов.
+    - Мы берём разрешённые события для текущего состояния и превращаем
+      их в понятные кнопкам флаги (can_*).
+    """
     state = session["state"] if session else None
     allowed = _ALLOWED_TRANSITIONS.get(state, set())
     return {
@@ -113,6 +151,12 @@ def compute_pack_ui_flags(session: dict | None) -> dict:
 
 
 def get_active_session() -> dict | None:
+    """
+    Возвращает активную упаковочную сессию в удобном формате.
+
+    Это данные, которые UI показывает пользователю: SKU, состояние,
+    текущая фаза и индекс шага.
+    """
     active = storage.get_active_pack_session()
     if not active:
         return None
@@ -131,6 +175,13 @@ def get_active_session() -> dict | None:
 
 
 def get_latest_session() -> dict | None:
+    """
+    Возвращает последнюю сессию (даже если она уже завершена).
+
+    Зачем:
+    - UI-флаги и gate должны учитывать последнюю упаковку.
+    - Например, start следующего SKU разрешён только после TABLE_EMPTY.
+    """
     latest = storage.get_latest_pack_session()
     if not latest:
         return None
@@ -149,10 +200,25 @@ def get_latest_session() -> dict | None:
 
 
 def get_plan_for_session(session: dict) -> list[dict]:
+    """
+    Возвращает полный план шагов для текущей сессии.
+
+    Мы не храним шаги в БД, а строим их из SKU,
+    чтобы оставить схему гибкой на раннем этапе.
+    """
     return _build_plan(session["sku"])["all"]
 
 
 def get_steps_state(session: dict) -> dict:
+    """
+    Возвращает состояние шагов для UI:
+    - фаза (LAYOUT или PACKING),
+    - индекс текущего шага,
+    - число шагов в фазе,
+    - подробности текущего шага.
+
+    Важно: UI не должен вычислять эти вещи сам.
+    """
     plan = _build_plan(session["sku"])
     phase = session["phase"] or PHASE_LAYOUT
     steps = plan["layout"] if phase == PHASE_LAYOUT else plan["packing"]
@@ -168,6 +234,15 @@ def get_steps_state(session: dict) -> dict:
 
 
 def start_session(sku: str) -> dict:
+    """
+    Стартует упаковочную сессию для SKU.
+
+    Правила:
+    - SKU обязателен.
+    - Нельзя стартовать, если есть активная сессия.
+    - Нельзя стартовать, если предыдущий SKU не подтвердил TABLE_EMPTY.
+    - Старт автоматически устанавливает фазу LAYOUT и шаг 0.
+    """
     sku = (sku or "").strip()
     if not sku:
         raise PackagingTransitionError("SKU обязателен для старта упаковки.")
@@ -204,6 +279,12 @@ def start_session(sku: str) -> dict:
 
 
 def apply_event(event_type: str, sku: str | None = None) -> dict:
+    """
+    Применяет событие FSM (закрытие коробки, печать этикетки, TABLE_EMPTY).
+
+    Это единственная точка, где мы меняем состояние FSM по событию,
+    поэтому здесь выполняется строгая проверка разрешённых переходов.
+    """
     active = storage.get_active_pack_session()
     session = active or storage.get_latest_pack_session()
     if not session:
@@ -236,6 +317,14 @@ def apply_event(event_type: str, sku: str | None = None) -> dict:
 
 
 def complete_current_step() -> dict:
+    """
+    Завершает текущий шаг в активной фазе.
+
+    Важные инварианты:
+    - Нельзя завершать шаги без активной сессии.
+    - Нельзя выйти за границы списка шагов.
+    - На каждый шаг пишется событие STEP_COMPLETED с подробным payload.
+    """
     active = storage.get_active_pack_session()
     if not active:
         raise PackagingTransitionError("Нет активной упаковочной сессии.")
@@ -279,6 +368,13 @@ def complete_current_step() -> dict:
 
 
 def advance_phase() -> dict:
+    """
+    Переводит фазу с LAYOUT на PACKING.
+
+    Инвариант:
+    - Перейти можно только после завершения всех шагов LAYOUT.
+    - При переходе пишется событие PHASE_CHANGED.
+    """
     active = storage.get_active_pack_session()
     if not active:
         raise PackagingTransitionError("Нет активной упаковочной сессии.")
