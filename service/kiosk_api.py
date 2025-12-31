@@ -9,14 +9,22 @@ from pydantic import BaseModel
 
 from core.logic import engine, KioskUIState
 from core.storage import get_conn
-from services.timers import record_timer_state, record_heartbeat
-
-from core.storage import get_conn
-from services.timers import record_timer_state, record_heartbeat
-
-from core.storage import get_shift_report
-
-from core.storage import get_conn
+from services.packaging import (
+    advance_phase,
+    apply_event,
+    complete_current_step,
+    compute_pack_ui_flags,
+    get_active_session as get_pack_active_session,
+    get_latest_session as get_pack_latest_session,
+    get_plan_for_session,
+    get_state as get_pack_state,
+    get_steps_state,
+    start_session as start_pack_session,
+    EVENT_CLOSE_BOX,
+    EVENT_PRINT_LABEL,
+    EVENT_TABLE_EMPTY,
+    PackagingTransitionError,
+)
 from services.timers import record_timer_state, record_heartbeat
 
 
@@ -130,6 +138,10 @@ class TimerStateRequest(BaseModel):
 
 class TimerHeartbeatRequest(BaseModel):
     source: Optional[str] = "kiosk"
+
+
+class PackStartRequest(BaseModel):
+    sku: str
 
 
 app = FastAPI(title="KZ Kiosk API")
@@ -331,6 +343,93 @@ async def timer_heartbeat(payload: TimerHeartbeatRequest):
         source=payload.source,
     )
     return {"status": "ok"}
+
+
+@app.post("/api/kiosk/pack/start")
+async def pack_start(payload: PackStartRequest):
+    try:
+        state = start_pack_session(payload.sku)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.post("/api/kiosk/pack/table-empty")
+async def pack_table_empty():
+    try:
+        state = apply_event(EVENT_TABLE_EMPTY)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.post("/api/kiosk/pack/close-box")
+async def pack_close_box():
+    try:
+        state = apply_event(EVENT_CLOSE_BOX)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.post("/api/kiosk/pack/print-label")
+async def pack_print_label():
+    try:
+        state = apply_event(EVENT_PRINT_LABEL)
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", "state": state}
+
+
+@app.get("/api/kiosk/pack/state")
+async def pack_state():
+    return {"status": "ok", "state": get_pack_state()}
+
+
+@app.get("/api/kiosk/pack/ui-state")
+async def pack_ui_state():
+    active_session = get_pack_active_session()
+    session_for_flags = active_session or get_pack_latest_session()
+    flags = compute_pack_ui_flags(session_for_flags)
+    return {
+        "active_session": active_session,
+        "pack_state": session_for_flags["state"] if session_for_flags else None,
+        **flags,
+    }
+
+
+@app.get("/api/kiosk/pack/plan")
+async def pack_plan():
+    active_session = get_pack_active_session()
+    if not active_session:
+        raise HTTPException(status_code=409, detail="Нет активной упаковочной сессии.")
+    return {"status": "ok", "steps": get_plan_for_session(active_session)}
+
+
+@app.get("/api/kiosk/pack/steps/state")
+async def pack_steps_state():
+    active_session = get_pack_active_session()
+    if not active_session:
+        raise HTTPException(status_code=409, detail="Нет активной упаковочной сессии.")
+    return {"status": "ok", **get_steps_state(active_session)}
+
+
+@app.post("/api/kiosk/pack/step/complete")
+async def pack_step_complete():
+    try:
+        result = complete_current_step()
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", **result}
+
+
+@app.post("/api/kiosk/pack/phase/next")
+async def pack_phase_next():
+    try:
+        result = advance_phase()
+    except PackagingTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "ok", **result}
 
 
 if __name__ == "__main__":
