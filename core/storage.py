@@ -67,18 +67,17 @@ def init_db():
     ON worker_shifts(worker_id, is_active)
     """)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
+
     # Таблица событий (events) — минимальный журнал таймеров work/idle.
     # Зачем нужна: хранит смену состояния таймера, чтобы позже посчитать
     # рабочее/простой время по событиям, а не по "тикерам".
     # Важно: CREATE TABLE IF NOT EXISTS — безопасная миграция без ломки существующих БД.
-=======
+
     # Минимальная таблица событий (events).
     # Зачем: хранит факты смены состояний таймера и heartbeat,
     # чтобы считать work/idle по событиям, а не по "тикерам".
     # CREATE TABLE IF NOT EXISTS безопасен для существующих БД.
->>>>>>> main
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +87,8 @@ def init_db():
         shift_id INTEGER,
         session_id INTEGER,
         worker_id TEXT
-=======
+                """)
+
     # Минимальная событийная модель (events).
     # Зачем: даёт единый журнал ключевых фактов (старт/финиш/упаковка),
     # чтобы потом строить отчёты без усложнения таблиц сессий и без ломки истории.
@@ -102,7 +102,8 @@ def init_db():
         shift_id INTEGER NULL,
         session_id INTEGER NULL,
         worker_id TEXT NULL
->>>>>>> main
+
+
     )
     """)
 
@@ -150,18 +151,45 @@ def add_event(
     worker_id: str | None = None,
 ) -> int:
     """
-<<<<<<< HEAD
+
     Добавляет событие в таблицу events.
     - Что делает: пишет запись с типом события и временем (ts).
     - Зачем: события нужны для вычисления work/idle на основе смены состояния,
       а не на основе частых heartbeat-тикеров.
     - Как использовать: вызывать при смене состояния таймера (WORK_STARTED/IDLE_STARTED).
-=======
+
     Добавляем событие в events.
     - Что делаем: записываем тип события и время (ts).
     - Зачем: события нужны для вычисления work/idle и heartbeat-авто-idle.
     - Как использовать: вызовы из /api/kiosk/timer/state и /api/kiosk/timer/heartbeat.
->>>>>>> main
+
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [ts, event_type, payload_json or "", shift_id, session_id, worker_id],
+    )
+    event_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(event_id or 0)
+
+
+def add_event(
+    event_type: str,
+    ts: float,
+    payload_json: str = "",
+    shift_id: int | None = None,
+    session_id: int | None = None,
+    worker_id: str | None = None,
+) -> int:
+    """
+    Добавляем событие в events.
+    - Что делаем: записываем тип события и время (ts).
+    - Зачем: события нужны для вычисления work/idle и heartbeat-авто-idle.
+    - Как использовать: вызовы из /api/kiosk/timer/state и /api/kiosk/timer/heartbeat.
     """
     conn = get_conn()
     cur = conn.cursor()
@@ -371,21 +399,19 @@ def add_event(
     session_id: int | None = None,
     worker_id: str | None = None,
 ) -> int:
-    """
-    Добавляем событие в events.
+    
+    """Добавляем событие в events.
     - Что делаем: пишем строку в events с типом и временем.
     - Зачем: фиксируем факт (например PACKED_CONFIRMED), чтобы потом считать метрики
       через COUNT/агрегации, а не вручную пересчитывать сессии.
     - Как влияет на метрики: packed_count = COUNT(type='PACKED_CONFIRMED').
     - Тестирование (curl):
-      1) POST /api/kiosk/session/finish {"status":"done"}
-      2) GET  /api/kiosk/report/shift?shift_id=...
+     # 1) POST /api/kiosk/session/finish {"status":"done"}
+     # 2) GET  /api/kiosk/report/shift?shift_id=...
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+    cur.execute( """INSERT INTO events(ts, type, payload_json, shift_id, session_id, worker_id),VALUES (?, ?, ?, ?, ?, ?)""",
         [ts, type, payload_json or "", shift_id, session_id, worker_id],
     )
     event_id = cur.lastrowid
