@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Literal
+import json
 import time
 
 from fastapi import FastAPI, HTTPException
@@ -8,7 +9,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.logic import engine, KioskUIState
-from core.storage import get_conn
+from core.storage import (
+    get_conn,
+    create_shift_plan,
+    get_active_shift_id,
+    get_shift_plan,
+    list_shift_plans,
+)
 from services.packaging import (
     advance_phase,
     apply_event,
@@ -26,6 +33,7 @@ from services.packaging import (
     PackagingTransitionError,
 )
 from services.timers import record_timer_state, record_heartbeat
+from services import shift_plans
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -142,6 +150,16 @@ class TimerHeartbeatRequest(BaseModel):
 
 class PackStartRequest(BaseModel):
     sku: str
+
+
+class ShiftPlanUploadRequest(BaseModel):
+    name: Optional[str] = None
+    text: Optional[str] = None
+    items: Optional[List[str]] = None
+
+
+class ShiftPlanSelectRequest(BaseModel):
+    plan_id: int
 
 
 app = FastAPI(title="KZ Kiosk API")
@@ -429,6 +447,102 @@ async def pack_ui_state():
         "active_session": active_session,
         "pack_state": session_for_flags["state"] if session_for_flags else None,
         **flags,
+    }
+
+
+@app.post("/api/kiosk/pack/plan/upload")
+async def pack_plan_upload(payload: ShiftPlanUploadRequest):
+    """
+    Загружает сменное задание (список SKU) для активной смены.
+
+    Мы принимаем либо текст со строками, либо JSON-список,
+    чтобы оператор мог быстро вставить список без лишнего формата.
+    """
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены для загрузки плана.")
+
+    raw_items: List[str] = []
+    if payload.items:
+        raw_items = payload.items
+    elif payload.text:
+        raw_items = payload.text.splitlines()
+
+    items = [item.strip() for item in raw_items if item and item.strip()]
+    if not items:
+        raise HTTPException(status_code=400, detail="Список SKU пуст.")
+
+    name = (payload.name or "Сменное задание").strip()
+    plan_id = create_shift_plan(
+        shift_id=shift_id,
+        name=name,
+        created_at=time.time(),
+        items_json=json.dumps(items, ensure_ascii=False),
+    )
+    return {"status": "ok", "id": plan_id, "name": name, "count": len(items)}
+
+
+@app.get("/api/kiosk/pack/plan/list")
+async def pack_plan_list():
+    """
+    Возвращает список сменных заданий для активной смены.
+    Выбранный план отмечаем отдельно, чтобы UI мог показать текущий выбор.
+    """
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
+
+    plans = []
+    for row in list_shift_plans(shift_id):
+        items = json.loads(row["items_json"] or "[]")
+        plans.append(
+            {
+                "id": int(row["id"]),
+                "name": row["name"],
+                "count": len(items),
+            }
+        )
+
+    selected_id = shift_plans.get_selected_plan_id(shift_id)
+    selected_plan = None
+    if selected_id:
+        row = get_shift_plan(selected_id)
+        if row and int(row["shift_id"]) == int(shift_id):
+            items = json.loads(row["items_json"] or "[]")
+            selected_plan = {
+                "id": int(row["id"]),
+                "name": row["name"],
+                "count": len(items),
+                "items": items,
+            }
+
+    return {"status": "ok", "plans": plans, "selected_id": selected_id, "selected_plan": selected_plan}
+
+
+@app.post("/api/kiosk/pack/plan/select")
+async def pack_plan_select(payload: ShiftPlanSelectRequest):
+    """
+    Выбирает активный план для текущей смены.
+    Это влияет только на подсказки в UI и не меняет логику упаковки.
+    """
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
+
+    row = get_shift_plan(payload.plan_id)
+    if not row or int(row["shift_id"]) != int(shift_id):
+        raise HTTPException(status_code=404, detail="План не найден для активной смены.")
+
+    shift_plans.select_plan(shift_id, payload.plan_id)
+    items = json.loads(row["items_json"] or "[]")
+    return {
+        "status": "ok",
+        "selected_plan": {
+            "id": int(row["id"]),
+            "name": row["name"],
+            "count": len(items),
+            "items": items,
+        },
     }
 
 

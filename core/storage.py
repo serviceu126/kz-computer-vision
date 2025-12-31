@@ -125,6 +125,19 @@ def init_db():
     )
     """)
 
+    # Таблица сменных заданий для упаковки.
+    # Мы сохраняем список SKU одной строкой JSON,
+    # чтобы не плодить дополнительные таблицы на раннем этапе.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS shift_plans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shift_id INTEGER NOT NULL,
+        created_at REAL NOT NULL,
+        name TEXT NOT NULL,
+        items_json TEXT NOT NULL
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -265,6 +278,61 @@ def update_pack_session_progress(
     )
     conn.commit()
     conn.close()
+
+
+def create_shift_plan(shift_id: int, name: str, created_at: float, items_json: str) -> int:
+    # Создаём сменное задание для активной смены.
+    # Храним список SKU в items_json, чтобы сохранять порядок и не терять данные.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO shift_plans(shift_id, created_at, name, items_json)
+           VALUES (?, ?, ?, ?)""",
+        [shift_id, created_at, name, items_json],
+    )
+    plan_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(plan_id or 0)
+
+
+def list_shift_plans(shift_id: int) -> list[sqlite3.Row]:
+    # Возвращаем все планы для указанной смены,
+    # чтобы UI мог показать оператору доступные варианты.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, name, created_at, items_json FROM shift_plans WHERE shift_id=? ORDER BY id DESC",
+        [shift_id],
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return list(rows or [])
+
+
+def get_shift_plan(plan_id: int) -> sqlite3.Row | None:
+    # Точный доступ к плану по ID нужен для выбора активного плана.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM shift_plans WHERE id=?", [plan_id])
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def get_active_shift_id() -> int:
+    # Ищем самую свежую активную смену.
+    # Это нужно, чтобы привязывать сменное задание к правильной смене.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id FROM worker_shifts WHERE is_active=1 ORDER BY start_time DESC LIMIT 1"
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return 0
+    return int(row["id"] or 0)
 
 
 def add_pack_event(
