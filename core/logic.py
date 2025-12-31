@@ -510,8 +510,8 @@ class KioskEngine:
             timer_state = None
             heartbeat_age_sec = None
             if shift_id_for_timer:
-                # Используем единый timestamp, чтобы timer_state и heartbeat_age_sec
-                # считались из одной точки времени и не "расходились" на секунды.
+                # Используем единый timestamp специально, чтобы timer_state и
+                # heartbeat_age_sec считались из одной точки времени.
                 now_dt = datetime.utcnow()
                 work_seconds, idle_seconds, timer_state = compute_work_idle_seconds(
                     shift_id_for_timer,
