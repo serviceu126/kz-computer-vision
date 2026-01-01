@@ -1118,6 +1118,8 @@
     }
  
   </style>
+  <!-- Подключаем kiosk.css после <style>, чтобы дизайн-система могла переопределить базовые стили. -->
+  <link rel="stylesheet" href="/static/kiosk.css" />
 </head>
 <body>
 <div class="app">
@@ -1543,23 +1545,6 @@
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title">Сотрудники</div>
-          </div>
-          <div class="panel-body">
-            <div class="stats-row">
-              <span class="stats-label">Активные смены</span>
-              <span class="stats-value">—</span>
-            </div>
-            <div class="stats-row">
-              <span class="stats-label">Лучшая выработка</span>
-              <span class="stats-value">—</span>
-            </div>
-            <div class="stats-row">
-              <span class="stats-label">Средняя выработка</span>
-              <span class="stats-value">—</span>
-            </div>
-            <div class="stats-note">
-              Отчёты обновляются автоматически при поступлении данных.
-            </div>
           </div>
           <div class="panel-body">
             <div class="stats-row">
