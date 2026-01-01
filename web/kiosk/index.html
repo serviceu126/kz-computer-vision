@@ -193,7 +193,6 @@
     .panel-body {
       position: relative;
       z-index: 1;
-      margin-bottom: var(--space-sm);
     }
 
     .panel-title {
@@ -1375,6 +1374,8 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
 
         <!-- Низ: события и статистика по текущей кровати. -->
         <div class="bottom">
@@ -1461,11 +1462,17 @@
                 <span class="dot"></span>
                 <span>Редактировать список</span>
               </div>
+              <!-- Импорт CSV доступен только мастеру и открывает системный выбор файла. -->
+              <div id="btnShiftPlanImport" class="pill-btn master-only master-only-hidden" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Загрузить сменное задание (CSV)</span>
+              </div>
               <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
                 <span class="dot"></span>
                 <span>Выбрать из списка</span>
               </div>
             </div>
+            <input id="shiftPlanImportFile" class="file-input-hidden" type="file" accept=".csv" />
             <div class="pack-meta">Текущий список на смену</div>
             <div class="shift-plan-list" id="shiftPlanList"></div>
             <datalist id="shiftPlanSkuCatalog"></datalist>
@@ -1530,8 +1537,6 @@
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
         <!-- Каталог SKU: базовый справочник, доступный только мастеру. -->
         <div class="panel" id="skuCatalogPanel">
@@ -1549,31 +1554,6 @@
             <div class="sku-catalog-list" id="skuCatalogList">
               <!-- Записи заполняются через JS, чтобы не дублировать логику в HTML. -->
             </div>
-            <div class="pill-row pill-row--start">
-              <div id="btnShiftPlanRemoveSelected" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Удалить выбранное</span>
-              </div>
-              <div id="btnShiftPlanMoveUp" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Вверх</span>
-              </div>
-              <div id="btnShiftPlanMoveDown" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Вниз</span>
-              </div>
-              <div id="btnShiftPlanUpload" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Редактировать список</span>
-              </div>
-              <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Выбрать из списка</span>
-              </div>
-            </div>
-            <div class="pack-meta">Текущий список на смену</div>
-            <div class="shift-plan-list" id="shiftPlanList"></div>
-            <datalist id="shiftPlanSkuCatalog"></datalist>
           </div>
         </div>
       </div>
@@ -1626,6 +1606,7 @@
               Отчёты обновляются автоматически при поступлении данных.
             </div>
           </div>
+          <div class="steps-list" id="stepsList"></div>
         </div>
       </div>
     </div>
@@ -1674,7 +1655,6 @@
               <div class="settings-hint">Выберите параметры и нажмите «Обновить предпросмотр».</div>
             </div>
           </div>
-          <div class="steps-list" id="stepsList"></div>
         </div>
 
         <div class="panel" id="reportsExportPanel">
@@ -3296,6 +3276,8 @@ function mkModalBtn(text, kind, onClick) {
   const btnShiftPlanRemoveSelected = document.getElementById("btnShiftPlanRemoveSelected");
   const btnShiftPlanMoveUp = document.getElementById("btnShiftPlanMoveUp");
   const btnShiftPlanMoveDown = document.getElementById("btnShiftPlanMoveDown");
+  const btnShiftPlanImport = document.getElementById("btnShiftPlanImport");
+  const shiftPlanImportFile = document.getElementById("shiftPlanImportFile");
   const shiftPlanSkuInput = document.getElementById("shiftPlanSkuInput");
   const shiftPlanQtyInput = document.getElementById("shiftPlanQtyInput");
   const shiftPlanRenameInput = document.getElementById("shiftPlanRenameInput");
@@ -3339,6 +3321,50 @@ function mkModalBtn(text, kind, onClick) {
     });
   }
 
+  async function importShiftPlanCsv(file) {
+    /**
+     * Импортируем сменное задание из CSV через backend.
+     *
+     * Backend проверит права мастера и валидность SKU,
+     * поэтому здесь только отправляем файл и показываем результат.
+     */
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const resp = await fetch("/api/kiosk/shift_plan/import", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.status === "error") {
+        const errors = (data.errors || []).slice(0, 3);
+        const errorText = errors.length
+          ? errors.map((e) => `${e.sku || "—"}: ${e.error || e}`).join("; ")
+          : (data.detail || "Импорт не выполнен.");
+        showPackToast(`Импорт отменён. Ошибки: ${errorText}`);
+        return;
+      }
+
+      const items = data.added_items || [];
+      const planName = "Импорт CSV";
+      const newPlan = {
+        id: Date.now(),
+        name: planName,
+        items,
+      };
+      shiftPlanList.unshift(newPlan);
+      shiftPlanSelected = newPlan;
+      shiftPlanSelectedSku = null;
+      saveShiftPlansToStorage();
+      renderShiftPlanPanel();
+      renderPackPlanPreview();
+      showPackToast(`Импорт завершён: ${items.length} SKU, пропущено ${data.skipped || 0}.`);
+    } catch (error) {
+      showPackToast("Ошибка сети: CSV не импортирован.");
+    }
+  }
+
   if (btnManualToggle && manualControls) {
     btnManualToggle.addEventListener("click", () => {
       /**
@@ -3356,6 +3382,21 @@ function mkModalBtn(text, kind, onClick) {
 
   if (btnShiftPlanUpload) {
     btnShiftPlanUpload.addEventListener("click", () => openShiftPlanUploadModal());
+  }
+  if (btnShiftPlanImport && shiftPlanImportFile) {
+    btnShiftPlanImport.addEventListener("click", () => {
+      /**
+       * Открываем системный выбор файла.
+       *
+       * Так мы остаёмся внутри киоска и не уводим пользователя в файловый менеджер.
+       */
+      shiftPlanImportFile.click();
+    });
+    shiftPlanImportFile.addEventListener("change", () => {
+      const file = shiftPlanImportFile.files && shiftPlanImportFile.files[0];
+      importShiftPlanCsv(file);
+      shiftPlanImportFile.value = "";
+    });
   }
   if (btnShiftPlanSelect) {
     btnShiftPlanSelect.addEventListener("click", () => openShiftPlanSelectModal());

@@ -5,7 +5,7 @@ import json
 import time
 import sqlite3
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -32,6 +32,7 @@ from core.storage import (
     create_sku_catalog_item,
     update_sku_catalog_item,
     get_report_rows,
+    get_active_sku_codes,
 )
 from services.packaging import (
     advance_phase,
@@ -426,84 +427,6 @@ async def get_state():
         master_mode=bool(master_id),
         master_id=master_id,
     )
-    return {"status": "ok", "master_id": master_id}
-
-
-@app.post("/api/kiosk/master/logout")
-async def master_logout(payload: MasterLogoutRequest):
-    """
-    Выход из режима мастера.
-
-    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
-    """
-    session = get_master_session()
-    master_id = session.get("master_id") if session.get("enabled") else None
-    reason = payload.reason or "manual"
-    if master_id:
-        add_event(
-            event_type="master_logout",
-            ts=time.time(),
-            payload_json=json.dumps(
-                {"master_id": master_id, "reason": reason},
-                ensure_ascii=False,
-            ),
-            shift_id=get_active_shift_id(),
-        )
-    clear_master_session()
-    return {"status": "ok", "reason": reason}
-
-
-@app.post("/api/kiosk/master/login")
-async def master_login(payload: MasterLoginRequest):
-    """
-    Вход в режим мастера по QR-коду.
-
-    Формат:
-    - буква M и 8 цифр (например, M13540876).
-    Почему так:
-    - формат легко распознаётся сканером;
-    - мы быстро валидируем его без внешних сервисов.
-    """
-    qr_text = (payload.qr_text or "").strip()
-    match = re.fullmatch(r"M(\d{8})", qr_text)
-    if not match:
-        raise HTTPException(
-            status_code=400,
-            detail="Неверный QR мастера. Ожидается формат M######## (например, M13540876).",
-        )
-    master_id = match.group(1)
-    set_master_session(master_id=master_id, last_active_ts=int(time.time()))
-    add_event(
-        event_type="master_login",
-        ts=time.time(),
-        payload_json=json.dumps({"master_id": master_id}, ensure_ascii=False),
-        shift_id=get_active_shift_id(),
-    )
-    return {"status": "ok", "master_id": master_id}
-
-
-@app.post("/api/kiosk/master/logout")
-async def master_logout(payload: MasterLogoutRequest):
-    """
-    Выход из режима мастера.
-
-    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
-    """
-    session = get_master_session()
-    master_id = session.get("master_id") if session.get("enabled") else None
-    reason = payload.reason or "manual"
-    if master_id:
-        add_event(
-            event_type="master_logout",
-            ts=time.time(),
-            payload_json=json.dumps(
-                {"master_id": master_id, "reason": reason},
-                ensure_ascii=False,
-            ),
-            shift_id=get_active_shift_id(),
-        )
-    clear_master_session()
-    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/master/login")
@@ -805,6 +728,76 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
         items_json=json.dumps(items, ensure_ascii=False),
     )
     return {"status": "ok", "id": plan_id, "name": name, "count": len(items)}
+
+
+@app.post("/api/kiosk/shift_plan/import")
+async def shift_plan_import(file: UploadFile = File(...)):
+    """
+    Импорт сменного задания из CSV (только мастер).
+
+    Формат CSV:
+    - sku_code, qty
+    """
+    ensure_master_mode()
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены для импорта плана.")
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Нужен файл CSV.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Файл CSV пуст.")
+
+    text = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames or "sku_code" not in reader.fieldnames or "qty" not in reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV должен содержать колонки sku_code и qty.")
+
+    active_skus = get_active_sku_codes()
+    errors = []
+    skipped = 0
+    aggregated: dict[str, int] = {}
+
+    for idx, row in enumerate(reader, start=2):
+        sku = (row.get("sku_code") or "").strip()
+        qty_raw = (row.get("qty") or "").strip()
+        if not sku or not qty_raw:
+            skipped += 1
+            continue
+        if sku not in active_skus:
+            errors.append({"row": idx, "sku": sku, "error": "SKU не найден или не активен."})
+            continue
+        try:
+            qty = int(qty_raw)
+        except ValueError:
+            errors.append({"row": idx, "sku": sku, "error": "Количество должно быть целым числом."})
+            continue
+        if qty <= 0:
+            errors.append({"row": idx, "sku": sku, "error": "Количество должно быть больше нуля."})
+            continue
+        aggregated[sku] = aggregated.get(sku, 0) + qty
+
+    if errors:
+        # Если есть ошибки, ничего не применяем — импорт атомарный.
+        return {"status": "error", "added_items": 0, "skipped": skipped, "errors": errors}
+
+    items = [{"sku": sku, "qty": qty} for sku, qty in aggregated.items()]
+    if not items:
+        return {"status": "error", "added_items": 0, "skipped": skipped, "errors": ["Нет валидных строк."]}
+
+    name = f"Импорт CSV {time.strftime('%Y-%m-%d %H:%M')}"
+    plan_id = create_shift_plan(
+        shift_id=shift_id,
+        name=name,
+        created_at=time.time(),
+        items_json=json.dumps(items, ensure_ascii=False),
+    )
+    # Новый импорт становится текущим планом смены,
+    # чтобы оператор сразу видел обновлённый список.
+    shift_plans.select_plan(shift_id, plan_id)
+    return {"status": "ok", "added_items": items, "skipped": skipped, "errors": []}
 
 
 @app.get("/api/kiosk/pack/plan/list")

@@ -345,6 +345,16 @@
   justify-content: flex-start;
 }
 
+/* Скрытый input для выбора файла: кнопка-пилюля запускает клик. */
+.file-input-hidden {
+  display: none;
+}
+
+/* Элементы только для мастера скрываем, пока режим не активен. */
+.master-only.master-only-hidden {
+  display: none;
+}
+
 .modal-input {
   width: 100%;
   background: transparent;

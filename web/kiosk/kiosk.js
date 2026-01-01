@@ -23,6 +23,7 @@
   // Вкладка "Управление" доступна только мастеру.
   const tabManagement = document.getElementById("tabManagement");
   const tabReports = document.getElementById("tabReports");
+  const masterOnlyElements = Array.from(document.querySelectorAll(".master-only"));
 
   // Чекбоксы настроек.
   const settingCanReorder = document.getElementById("settingCanReorder");
@@ -128,6 +129,11 @@
     if (tabReports) {
       tabReports.classList.toggle("tab--hidden", !isMaster);
     }
+
+    // Показываем/скрываем элементы, доступные только мастеру.
+    masterOnlyElements.forEach((el) => {
+      el.classList.toggle("master-only-hidden", !isMaster);
+    });
 
     // Если мастер вышел и мы были на "Управлении" или "Отчётах", возвращаемся к "Оператору".
     if (!isMaster && window.activateMainTab) {
@@ -903,6 +909,7 @@
 
   // Стартовая синхронизация настроек.
   updateSettingsAvailability();
+  updateManagementTabVisibility();
   fetchSettings();
   initMainTabs();
   fetchSkuCatalog();
