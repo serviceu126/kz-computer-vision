@@ -54,6 +54,15 @@
   color: var(--text-main);
 }
 
+/* Мастер-вкладки и экраны скрываем, если мастер-режим не активен. */
+body:not(.is-master-active) .tab--master {
+  display: none;
+}
+
+body:not(.is-master-active) .screen--master {
+  display: none;
+}
+
 /* Прячем вкладку, если мастер-режим выключен. */
 .tab--hidden {
   display: none;

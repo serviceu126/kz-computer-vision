@@ -177,8 +177,8 @@
       { id: "tab-queue", label: "Очередь" },
     ];
     if (isMaster) {
-      tabs.push({ id: "tab-admin", label: "Управление" });
-      tabs.push({ id: "tab-reports", label: "Отчёты" });
+      tabs.push({ id: "tab-admin", label: "Управление", master: true });
+      tabs.push({ id: "tab-reports", label: "Отчёты", master: true });
     }
     tabs.push({ id: "tab-stats", label: "Статистика" });
 
@@ -190,6 +190,9 @@
     tabs.forEach((tab) => {
       const btn = document.createElement("div");
       btn.className = "pill-btn tab";
+      if (tab.master) {
+        btn.classList.add("tab--master");
+      }
       if (tab.id === activeTabId) {
         btn.classList.add("tab--active", "pill-btn--active");
       }
