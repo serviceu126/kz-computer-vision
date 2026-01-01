@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Literal
+import re
 import json
 import time
 
@@ -15,6 +16,9 @@ from core.storage import (
     get_active_shift_id,
     get_shift_plan,
     list_shift_plans,
+    get_kiosk_setting,
+    get_kiosk_settings,
+    set_kiosk_setting,
 )
 from services.packaging import (
     advance_phase,
@@ -110,6 +114,11 @@ class KioskState(BaseModel):
     camera_stream_url: str="http://127.0.0.1:8080/stream"
     overlay_slots: List[OverlaySlot]
 
+    # Режим мастера (супервайзер).
+    # Нужен только для UI, чтобы подсветить, кто имеет право на ручные действия.
+    master_mode: bool = False
+    master_id: Optional[str] = None
+
 
 class StartSessionRequest(BaseModel):
     worker_id: Optional[str] = None
@@ -162,6 +171,21 @@ class ShiftPlanSelectRequest(BaseModel):
     plan_id: int
 
 
+class MasterLoginRequest(BaseModel):
+    qr_text: str
+
+
+class KioskSettingsRequest(BaseModel):
+    operator_can_reorder: Optional[bool] = None
+    operator_can_edit_qty: Optional[bool] = None
+
+
+# Храним ID мастера в памяти сервиса.
+# Это простой и прозрачный подход: UI не зависит от базы, а состояние
+# сбрасывается при перезапуске сервиса, что безопасно для доступа.
+MASTER_STATE = {"id": None}
+
+
 app = FastAPI(title="KZ Kiosk API")
 
 app.mount(
@@ -179,6 +203,7 @@ async def root():
 @app.get("/api/kiosk/state", response_model=KioskState)
 async def get_state():
     ui: KioskUIState = engine.get_ui_state()
+    master_id = MASTER_STATE["id"]
     return KioskState(
         worker_name=ui.worker_name,
         shift_label=ui.shift_label,
@@ -239,7 +264,41 @@ async def get_state():
             )
             for o in ui.overlay_slots
         ],
+        master_mode=bool(master_id),
+        master_id=master_id,
     )
+
+
+@app.post("/api/kiosk/master/login")
+async def master_login(payload: MasterLoginRequest):
+    """
+    Вход в режим мастера по QR-коду.
+
+    Формат:
+    - буква M и 8 цифр (например, M13540876).
+    Почему так:
+    - формат легко распознаётся сканером;
+    - мы быстро валидируем его без внешних сервисов.
+    """
+    qr_text = (payload.qr_text or "").strip()
+    if not re.fullmatch(r"M\d{8}", qr_text):
+        raise HTTPException(
+            status_code=400,
+            detail="Неверный QR мастера. Ожидается формат M######## (например, M13540876).",
+        )
+    MASTER_STATE["id"] = qr_text
+    return {"status": "ok", "master_id": qr_text}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout():
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    MASTER_STATE["id"] = None
+    return {"status": "ok"}
 
 
 @app.post("/api/kiosk/session/start")
@@ -462,6 +521,14 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
     if not shift_id:
         raise HTTPException(status_code=409, detail="Нет активной смены для загрузки плана.")
 
+    # Проверяем право редактирования количества/очереди.
+    # Если мастер запретил редактирование, оператор не должен менять список.
+    if get_kiosk_setting("operator_can_edit_qty", 1) == 0:
+        raise HTTPException(
+            status_code=403,
+            detail="Редактирование списка запрещено настройками мастера.",
+        )
+
     raw_items: List[str] = []
     if payload.items:
         raw_items = payload.items
@@ -542,6 +609,51 @@ async def pack_plan_select(payload: ShiftPlanSelectRequest):
             "name": row["name"],
             "count": len(items),
             "items": items,
+        },
+    }
+
+
+@app.get("/api/kiosk/settings")
+async def get_kiosk_settings_api():
+    """
+    Возвращает настройки киоска.
+
+    Мы отдаём фиксированный набор ключей,
+    чтобы UI мог стабильно строить интерфейс.
+    """
+    settings = get_kiosk_settings(["operator_can_reorder", "operator_can_edit_qty"])
+    return {
+        "status": "ok",
+        "settings": {
+            "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
+            "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
+        },
+    }
+
+
+@app.post("/api/kiosk/settings")
+async def set_kiosk_settings_api(payload: KioskSettingsRequest):
+    """
+    Сохраняет настройки киоска.
+
+    Важно:
+    - менять настройки может только мастер (QR уже отсканирован);
+    - изменения сразу сохраняются в SQLite и переживают перезапуск сервиса.
+    """
+    if not MASTER_STATE["id"]:
+        raise HTTPException(status_code=403, detail="Настройки доступны только мастеру.")
+
+    if payload.operator_can_reorder is not None:
+        set_kiosk_setting("operator_can_reorder", int(payload.operator_can_reorder))
+    if payload.operator_can_edit_qty is not None:
+        set_kiosk_setting("operator_can_edit_qty", int(payload.operator_can_edit_qty))
+
+    settings = get_kiosk_settings(["operator_can_reorder", "operator_can_edit_qty"])
+    return {
+        "status": "ok",
+        "settings": {
+            "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
+            "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
         },
     }
 
