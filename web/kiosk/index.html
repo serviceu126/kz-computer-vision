@@ -357,7 +357,7 @@
     .steps-list {
       margin-top: 6px;
       max-height: 100%;
-      overflow: hidden;
+      overflow: auto;
     }
 
     .step-row {
@@ -652,8 +652,8 @@
        поэтому ограничиваем рост по высоте и не даём блоку "расползаться". */
     .steps-card {
       flex: 0 0 auto;
-      min-height: 110px;
-      max-height: 160px;
+      min-height: 90px;
+      max-height: 120px;
     }
 
     /* Контейнер правой колонки:
@@ -703,6 +703,14 @@
     }
 
     /* Блок сменного задания: компактные элементы ввода и список SKU. */
+    .shift-plan-rename {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
+    }
+
     .shift-plan-controls {
       display: grid;
       grid-template-columns: 1fr auto auto;
@@ -725,18 +733,50 @@
       max-width: 90px;
     }
 
+    .shift-plan-catalog {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .shift-plan-catalog-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 6px;
+      max-height: 110px;
+      overflow: auto;
+    }
+
+    .shift-plan-catalog-item {
+      padding: 6px 8px;
+      border-radius: 10px;
+      border: 1px solid var(--border-soft);
+      background: rgba(2, 6, 23, 0.55);
+      color: var(--text-main);
+      font-size: 12px;
+      text-align: center;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .shift-plan-catalog-item:hover {
+      border-color: rgba(56, 189, 248, 0.7);
+      color: #e0f2fe;
+    }
+
     .shift-plan-list {
       margin-top: 8px;
       display: flex;
       flex-direction: column;
       gap: 6px;
       max-height: 160px;
-      overflow: hidden;
+      overflow: auto;
     }
 
     .shift-plan-row {
       display: grid;
-      grid-template-columns: 1fr auto auto auto auto;
+      grid-template-columns: 1fr auto auto auto auto auto;
       gap: 6px;
       align-items: center;
       padding: 6px 8px;
@@ -760,6 +800,11 @@
       color: var(--text-main);
       font-size: 12px;
       cursor: pointer;
+    }
+
+    .shift-plan-mini-btn.danger {
+      border-color: rgba(248, 113, 113, 0.6);
+      color: #fecaca;
     }
 
     .shift-plan-mini-btn.disabled {
@@ -1169,25 +1214,31 @@
         </div>
       </div>
 
-<<<<<<< HEAD
-
-      <div class="card steps-card" style="flex:0.5; min-height:0;">
-
-      <div class="card" id="shiftPlanCard">
-=======
       <div class="card shift-plan-card" id="shiftPlanCard">
->>>>>>> 3b7f80358a106710bc1525297817c6ef55d5a939
         <div class="card-title">Сменное задание</div>
         <div class="pack-meta" id="shiftPlanName">План не выбран</div>
         <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
+        <div class="shift-plan-rename">
+          <input id="shiftPlanRenameInput" class="shift-plan-input" placeholder="Название плана для смены" />
+          <div id="btnShiftPlanRename" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Переименовать</span>
+          </div>
+        </div>
         <div class="shift-plan-controls">
           <input id="shiftPlanSkuInput" class="shift-plan-input" list="shiftPlanSkuCatalog"
-                 placeholder="SKU из каталога" />
-          <input id="shiftPlanQtyInput" class="shift-plan-input shift-plan-qty" type="number" min="1" value="1" />
+                 placeholder="SKU из каталога или вручную" />
+          <input id="shiftPlanQtyInput" class="shift-plan-input shift-plan-qty" type="number" min="1"
+                 value="1" placeholder="Количество" />
           <div id="btnShiftPlanAdd" class="action-pill" role="button" tabindex="0">
             <span class="dot"></span>
             <span>Добавить</span>
           </div>
+        </div>
+        <div class="shift-plan-catalog">
+          <input id="shiftPlanCatalogSearch" class="shift-plan-input"
+                 placeholder="Поиск в каталоге SKU" />
+          <div class="shift-plan-catalog-list" id="shiftPlanCatalogList"></div>
         </div>
         <div class="action-row" style="justify-content:flex-start;">
           <div id="btnShiftPlanRemoveSelected" class="action-pill" role="button" tabindex="0">
@@ -1196,7 +1247,7 @@
           </div>
           <div id="btnShiftPlanUpload" class="action-pill" role="button" tabindex="0">
             <span class="dot"></span>
-            <span>Загрузить список</span>
+            <span>Редактировать список</span>
           </div>
           <div id="btnShiftPlanSelect" class="action-pill" role="button" tabindex="0">
             <span class="dot"></span>
@@ -1316,8 +1367,8 @@
   <div class="modal" role="dialog" aria-modal="true">
     <div class="modal-content">
       <div>
-        <div class="modal-title">Загрузка сменного задания</div>
-        <div class="modal-sub">Вставьте список SKU построчно и нажмите «Загрузить».</div>
+        <div class="modal-title">Редактирование сменного задания</div>
+        <div class="modal-sub">Вставьте список SKU построчно и нажмите «Сохранить».</div>
       </div>
       <div class="modal-scan shift-plan-upload-box">
         <input id="shiftPlanNameInput" class="shift-plan-modal-input" type="text"
@@ -1363,6 +1414,22 @@
   const SHIFT_PLAN_STORAGE_KEY = "kz_shift_plans";
   const SHIFT_PLAN_ACTIVE_KEY = "kz_shift_plan_active";
 
+  function warnAboutMergeMarkers() {
+    /**
+     * Проверяем HTML на остатки конфликтных маркеров.
+     *
+     * Что делаем:
+     * - ищем подстроки <<<<<<<, =======, >>>>>>> в тексте страницы.
+     * Почему это важно:
+     * - такие маркеры ломают верстку и вводят оператора в заблуждение;
+     * - мы лишь предупреждаем в консоли, чтобы не блокировать работу UI.
+     */
+    const text = document.body ? (document.body.innerText || "") : "";
+    if (text.includes("<<<<<<<") || text.includes("=======") || text.includes(">>>>>>>")) {
+      console.warn("Внимание: в DOM обнаружены конфликтные маркеры merge. Проверьте HTML.");
+    }
+  }
+
   let lastState = null;
   let timerStart = null;
   let workBase = 0;
@@ -1373,6 +1440,7 @@
   let shiftPlanList = [];
   let shiftPlanSelectedSku = null;
   let manualModeEnabled = false;
+  let shiftPlanCatalogFilter = "";
 
   // Учебный каталог SKU: пока это локальный список,
   // который можно заменить на API без изменения UI-логики.
@@ -1875,11 +1943,16 @@ document.getElementById("bedDetails").textContent =
      */
     const nameEl = document.getElementById("shiftPlanName");
     const countEl = document.getElementById("shiftPlanCount");
+    const renameInput = document.getElementById("shiftPlanRenameInput");
     if (!nameEl || !countEl) return;
 
     if (!shiftPlanSelected) {
       nameEl.textContent = "План не выбран";
       countEl.textContent = "Количество SKU: —";
+      if (renameInput) {
+        renameInput.value = "";
+        renameInput.placeholder = "Название плана для смены";
+      }
       renderShiftPlanList([]);
       return;
     }
@@ -1887,6 +1960,9 @@ document.getElementById("bedDetails").textContent =
     const totalCount = shiftPlanSelected.items.reduce((sum, item) => sum + item.qty, 0);
     nameEl.textContent = `Выбран план: ${shiftPlanSelected.name}`;
     countEl.textContent = `Количество SKU: ${totalCount}`;
+    if (renameInput) {
+      renameInput.value = shiftPlanSelected.name;
+    }
     renderShiftPlanList(shiftPlanSelected.items);
   }
 
@@ -1934,9 +2010,14 @@ document.getElementById("bedDetails").textContent =
       plusBtn.textContent = "+";
       plusBtn.addEventListener("click", () => updateShiftPlanQty(item.sku, 1));
 
+      const deleteBtn = document.createElement("div");
+      deleteBtn.className = "shift-plan-mini-btn danger";
+      deleteBtn.textContent = "Удалить";
+      deleteBtn.addEventListener("click", () => removeSkuFromShiftPlan(item.sku));
+
       const runBtn = document.createElement("div");
       runBtn.className = "shift-plan-mini-btn";
-      runBtn.textContent = "Запустить (супервайзер)";
+      runBtn.textContent = "Запустить";
       if (!manualModeEnabled) {
         runBtn.classList.add("disabled");
       } else {
@@ -1947,8 +2028,51 @@ document.getElementById("bedDetails").textContent =
       row.appendChild(qtyEl);
       row.appendChild(minusBtn);
       row.appendChild(plusBtn);
+      row.appendChild(deleteBtn);
       row.appendChild(runBtn);
       listEl.appendChild(row);
+    });
+  }
+
+  function renderShiftPlanCatalog() {
+    /**
+     * Показываем "живой" каталог SKU с фильтром.
+     *
+     * Что это даёт оператору:
+     * - быстрый выбор по клику;
+     * - визуальный список, а не скрытый выпадающий список;
+     * - поиск по подстроке для экономии времени.
+     */
+    const listEl = document.getElementById("shiftPlanCatalogList");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+
+    const filter = (shiftPlanCatalogFilter || "").toLowerCase();
+    const visibleItems = SHIFT_PLAN_SKU_CATALOG.filter((sku) => {
+      return !filter || sku.toLowerCase().includes(filter);
+    });
+
+    if (!visibleItems.length) {
+      const empty = document.createElement("div");
+      empty.className = "pack-meta";
+      empty.textContent = "Совпадений не найдено.";
+      listEl.appendChild(empty);
+      return;
+    }
+
+    visibleItems.forEach((sku) => {
+      const item = document.createElement("div");
+      item.className = "shift-plan-catalog-item";
+      item.textContent = sku;
+      item.addEventListener("click", () => {
+        if (shiftPlanSkuInput) {
+          shiftPlanSkuInput.value = sku;
+          if (shiftPlanQtyInput) {
+            shiftPlanQtyInput.focus();
+          }
+        }
+      });
+      listEl.appendChild(item);
     });
   }
 
@@ -1970,6 +2094,47 @@ document.getElementById("bedDetails").textContent =
     saveShiftPlansToStorage();
     renderShiftPlanPanel();
     renderPackPlanPreview();
+  }
+
+  function removeSkuFromShiftPlan(sku) {
+    /**
+     * Полностью удаляем SKU из выбранного плана.
+     *
+     * Почему отдельно:
+     * - оператор ожидает явную кнопку "Удалить";
+     * - так проще объяснить, что строка исчезает полностью,
+     *   независимо от количества в колонке "×".
+     */
+    if (!shiftPlanSelected) return;
+    shiftPlanSelected.items = shiftPlanSelected.items.filter((item) => item.sku !== sku);
+    if (shiftPlanSelectedSku === sku) {
+      shiftPlanSelectedSku = null;
+    }
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
+  }
+
+  function renameShiftPlan() {
+    /**
+     * Переименовываем активный план.
+     *
+     * Зачем это нужно:
+     * - оператору важно видеть понятное имя ("Смена А", "Ночь");
+     * - так проще выбирать план из списка, особенно при частых сменах.
+     */
+    if (!shiftPlanSelected) {
+      showPackToast("Сначала выберите план, затем задайте ему имя.");
+      return;
+    }
+    const nextName = (shiftPlanRenameInput.value || "").trim();
+    if (!nextName) {
+      showPackToast("Введите название плана перед сохранением.");
+      return;
+    }
+    shiftPlanSelected.name = nextName;
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
   }
 
   function addSkuToShiftPlan() {
@@ -2037,6 +2202,7 @@ document.getElementById("bedDetails").textContent =
       option.value = sku;
       dataList.appendChild(option);
     });
+    renderShiftPlanCatalog();
   }
 
   async function startSkuFromPlan(sku) {
@@ -2045,8 +2211,11 @@ document.getElementById("bedDetails").textContent =
      * После успешного старта уменьшаем количество, чтобы список отражал прогресс.
      */
     if (!manualModeEnabled) return;
-    await handlePackAction("/api/kiosk/pack/start", { sku });
-    updateShiftPlanQty(sku, -1);
+    const ok = await handlePackAction("/api/kiosk/pack/start", { sku });
+    if (ok) {
+      updateShiftPlanQty(sku, -1);
+      showPackToast(`SKU ${sku} запущен. Очередь обновлена.`);
+    }
   }
 
   function renderShiftPlanSelectActions() {
@@ -2131,8 +2300,14 @@ document.getElementById("bedDetails").textContent =
   }
 
   async function handlePackAction(url, body) {
-    // Унифицированный вызов упаковочных действий.
-    // Если backend вернул 409/400, показываем понятный текст оператору.
+    /**
+     * Унифицированный вызов упаковочных действий.
+     *
+     * Почему возвращаем true/false:
+     * - это позволяет UI понять, было ли действие успешным;
+     * - в сценариях "Запустить SKU" можно корректно обновить очередь,
+     *   не удаляя строку при ошибке backend.
+     */
     try {
       const resp = await fetch(url, {
         method: "POST",
@@ -2142,11 +2317,13 @@ document.getElementById("bedDetails").textContent =
       if (!resp.ok) {
         const detail = await resp.json().catch(() => ({}));
         showPackToast(detail.detail || "Не удалось выполнить действие.");
-        return;
+        return false;
       }
       await refreshPackData();
+      return true;
     } catch (e) {
       showPackToast("Ошибка сети: действие не выполнено.");
+      return false;
     }
   }
 
@@ -2156,14 +2333,6 @@ document.getElementById("bedDetails").textContent =
     await fetchPackStepsState();
     loadShiftPlansFromStorage();
   }
-
-  setInterval(fetchState, 1500);
-  setInterval(refreshPackData, 2000);
-  setInterval(tickTimers, 1000);
-  fetchState();
-  refreshPackData();
-  initShiftPlanCatalog();
-  loadShiftPlansFromStorage();
 
   // ───────── Сканер, смены и рабочие центры ─────────
 
@@ -2344,7 +2513,7 @@ document.getElementById("bedDetails").textContent =
     shiftPlanUploadHint.textContent = "Ожидание ввода…";
     shiftPlanUploadActions.innerHTML = "";
 
-    const btnUpload = mkModalBtn("Загрузить", "success", async () => {
+    const btnUpload = mkModalBtn("Сохранить список", "success", async () => {
       const text = (shiftPlanTextarea.value || "").trim();
       if (!text) {
         shiftPlanUploadHint.textContent = "Список SKU пуст. Вставьте значения построчно.";
@@ -2527,6 +2696,9 @@ function mkModalBtn(text, kind, onClick) {
   const btnShiftPlanRemoveSelected = document.getElementById("btnShiftPlanRemoveSelected");
   const shiftPlanSkuInput = document.getElementById("shiftPlanSkuInput");
   const shiftPlanQtyInput = document.getElementById("shiftPlanQtyInput");
+  const shiftPlanRenameInput = document.getElementById("shiftPlanRenameInput");
+  const btnShiftPlanRename = document.getElementById("btnShiftPlanRename");
+  const shiftPlanCatalogSearch = document.getElementById("shiftPlanCatalogSearch");
 
   if (btnPackStart) {
     btnPackStart.addEventListener("click", () => {
@@ -2592,6 +2764,36 @@ function mkModalBtn(text, kind, onClick) {
   if (btnShiftPlanRemoveSelected) {
     btnShiftPlanRemoveSelected.addEventListener("click", () => removeSelectedSkuFromShiftPlan());
   }
+  if (btnShiftPlanRename) {
+    btnShiftPlanRename.addEventListener("click", () => renameShiftPlan());
+  }
+  if (shiftPlanCatalogSearch) {
+    shiftPlanCatalogSearch.addEventListener("input", () => {
+      /**
+       * Фильтр каталога живой: оператор сразу видит суженный список.
+       * Это экономит время, особенно при длинных сменных заданиях.
+       */
+      shiftPlanCatalogFilter = shiftPlanCatalogSearch.value || "";
+      renderShiftPlanCatalog();
+    });
+  }
+
+  /**
+   * Инициализация UI.
+   *
+   * Почему именно здесь:
+   * - DOM уже готов (скрипт внизу страницы);
+   * - элементы уже найдены и можно безопасно их использовать;
+   * - сначала включаем защитные проверки, затем подгружаем данные.
+   */
+  warnAboutMergeMarkers();
+  setInterval(fetchState, 1500);
+  setInterval(refreshPackData, 2000);
+  setInterval(tickTimers, 1000);
+  fetchState();
+  refreshPackData();
+  initShiftPlanCatalog();
+  loadShiftPlansFromStorage();
 
   // helper для отладочной подписи внизу
   const scanDebug = document.createElement("div");
