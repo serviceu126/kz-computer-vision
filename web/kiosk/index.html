@@ -1138,7 +1138,7 @@
       <span>Очередь</span>
     </div>
     <!-- Вкладку "Управление" показываем только мастеру, чтобы не путать оператора. -->
-    <div class="pill-btn tab" role="button" tabindex="0" data-screen="screenManagement" id="tabManagement">
+    <div class="pill-btn tab tab--hidden" role="button" tabindex="0" data-screen="screenManagement" id="tabManagement">
       <span class="dot"></span>
       <span>Управление</span>
     </div>
@@ -1509,16 +1509,6 @@
               </div>
             </div>
             <!-- Заглушка под будущий каталог SKU, чтобы структура была готова заранее. -->
-            <div class="panel panel--settings" id="catalogPlaceholder">
-              <div class="panel-header">
-                <div class="panel-title">Каталог SKU (скоро)</div>
-              </div>
-              <div class="panel-body">
-                <div class="settings-hint">
-                  Здесь появится каталог SKU и быстрый поиск по моделям.
-                </div>
-              </div>
-            </div>
             <!-- Кнопки действий держим внизу и справа, чтобы они не мешали чтению. -->
             <div class="settings-actions">
               <div id="btnSettingsSave" class="pill-btn" role="button" tabindex="0">
@@ -1532,6 +1522,25 @@
             </div>
             <div class="settings-hint" id="settingsHint">
               Настройки доступны только мастеру. Перед изменением войдите как мастер.
+            </div>
+          </div>
+        </div>
+
+        <!-- Каталог SKU: базовый справочник, доступный только мастеру. -->
+        <div class="panel" id="skuCatalogPanel">
+          <div class="panel-header">
+            <div class="panel-title">Каталог SKU</div>
+          </div>
+          <div class="panel-body">
+            <div class="sku-catalog-toolbar">
+              <input id="skuCatalogSearch" class="settings-input" placeholder="Поиск SKU, модели или названия" />
+              <div id="btnSkuAdd" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Добавить SKU</span>
+              </div>
+            </div>
+            <div class="sku-catalog-list" id="skuCatalogList">
+              <!-- Записи заполняются через JS, чтобы не дублировать логику в HTML. -->
             </div>
           </div>
         </div>
@@ -1708,6 +1717,57 @@
       <div class="modal-actions" id="masterLoginActions"></div>
       <div class="modal-actions modal-actions--footer">
         <div id="masterLoginCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+          <span class="dot"></span>
+          <span>ОТМЕНА</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модалка добавления/редактирования SKU -->
+<div id="skuCatalogModalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div>
+        <div class="modal-title" id="skuCatalogModalTitle">Добавить SKU</div>
+        <div class="modal-sub">Заполните параметры, чтобы создать запись в каталоге.</div>
+      </div>
+      <div class="modal-scan">
+        <div class="sku-form-grid">
+          <div class="sku-form-field">
+            <label class="settings-label" for="skuModelCode">Модель</label>
+            <input id="skuModelCode" class="settings-input" type="text" placeholder="Например: 003" />
+          </div>
+          <div class="sku-form-field">
+            <label class="settings-label" for="skuWidthCm">Ширина (см)</label>
+            <input id="skuWidthCm" class="settings-input" type="number" min="80" max="300" placeholder="160" />
+          </div>
+          <div class="sku-form-field">
+            <label class="settings-label" for="skuFabricCode">Ткань</label>
+            <input id="skuFabricCode" class="settings-input" type="text" placeholder="VelutaLux" />
+          </div>
+          <div class="sku-form-field">
+            <label class="settings-label" for="skuColorCode">Цвет</label>
+            <input id="skuColorCode" class="settings-input" type="text" placeholder="07" />
+          </div>
+          <div class="sku-form-field sku-form-field--full">
+            <label class="settings-label" for="skuName">Название</label>
+            <input id="skuName" class="settings-input" type="text" placeholder="Кровать Сонна 160" />
+          </div>
+        </div>
+        <div class="sku-preview">
+          <span class="sku-preview-label">SKU (предпросмотр)</span>
+          <span id="skuPreviewValue">—</span>
+        </div>
+        <div class="settings-row sku-active-row">
+          <input id="skuIsActive" type="checkbox" checked />
+          <label for="skuIsActive">SKU активен</label>
+        </div>
+      </div>
+      <div class="modal-actions" id="skuCatalogModalActions"></div>
+      <div class="modal-actions modal-actions--footer">
+        <div id="skuCatalogModalCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
           <span class="dot"></span>
           <span>ОТМЕНА</span>
         </div>

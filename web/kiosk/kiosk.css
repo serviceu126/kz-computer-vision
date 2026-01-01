@@ -211,6 +211,90 @@
   flex-wrap: wrap;
 }
 
+/* Каталог SKU: панель поиска и список должны быть удобны для мастера. */
+.sku-catalog-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-md);
+  align-items: center;
+}
+
+.sku-catalog-list {
+  margin-top: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.sku-catalog-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1.4fr 1fr auto;
+  gap: var(--space-md);
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: var(--border-default);
+  background: var(--surface-deep);
+}
+
+.sku-catalog-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.sku-catalog-title {
+  font-size: var(--font-md);
+  font-weight: 500;
+}
+
+.sku-catalog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+/* Форма модалки каталога: делаем ровную сетку для полей. */
+.sku-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.sku-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.sku-form-field--full {
+  grid-column: 1 / -1;
+}
+
+.sku-preview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: var(--border-info-soft);
+  background: var(--surface-info-soft);
+  color: var(--info-text);
+  margin-bottom: var(--space-sm);
+}
+
+.sku-preview-label {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.sku-active-row {
+  margin-top: var(--space-xs);
+}
+
 .modal-input {
   width: 100%;
   background: transparent;

@@ -3,8 +3,9 @@ from typing import List, Optional, Literal
 import re
 import json
 import time
+import sqlite3
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -24,6 +25,9 @@ from core.storage import (
     set_master_session,
     clear_master_session,
     update_master_last_active,
+    list_sku_catalog,
+    create_sku_catalog_item,
+    update_sku_catalog_item,
 )
 from services.packaging import (
     advance_phase,
@@ -193,6 +197,21 @@ class MasterLogoutRequest(BaseModel):
     reason: Optional[str] = "manual"
 
 
+class SkuCreateRequest(BaseModel):
+    sku_code: str
+    name: str
+    model_code: str
+    width_cm: int
+    fabric_code: str
+    color_code: str
+    is_active: Optional[bool] = True
+
+
+class SkuUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
 def update_master_activity():
     # Фиксируем время последнего действия мастера в базе.
     # Так таймаут считается устойчиво, даже после перезапуска сервиса.
@@ -227,6 +246,20 @@ def ensure_master_session_alive():
                 shift_id=get_active_shift_id(),
             )
         clear_master_session()
+
+
+def ensure_master_mode() -> dict:
+    """
+    Проверяем, что мастер-режим активен.
+
+    Это единая точка контроля, чтобы не дублировать проверки
+    по всем endpoint-ам каталога.
+    """
+    ensure_master_session_alive()
+    session = get_master_session()
+    if not session.get("enabled"):
+        raise HTTPException(status_code=403, detail="Доступно только в мастер-режиме.")
+    return session
 
 
 app = FastAPI(title="KZ Kiosk API")
@@ -818,6 +851,61 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
         "master_mode": True,
         "master_id": session.get("master_id"),
     }
+
+
+@app.get("/api/kiosk/sku")
+async def sku_list(
+    q: Optional[str] = Query(None, description="Поиск по SKU/названию/модели"),
+    include_inactive: bool = Query(False, description="Показывать неактивные SKU"),
+):
+    """
+    Возвращает список SKU из каталога.
+
+    По умолчанию отдаём только активные позиции,
+    чтобы UI не захламлялся архивом.
+    """
+    ensure_master_mode()
+    items = list_sku_catalog(search=q, include_inactive=include_inactive)
+    return {"status": "ok", "items": items}
+
+
+@app.post("/api/kiosk/sku")
+async def sku_create(payload: SkuCreateRequest):
+    """
+    Создаёт SKU в каталоге (только мастер).
+    """
+    ensure_master_mode()
+    sku_code = payload.sku_code.strip()
+    name = payload.name.strip()
+    if not sku_code or not name:
+        raise HTTPException(status_code=400, detail="SKU и имя не должны быть пустыми.")
+    try:
+        sku_id = create_sku_catalog_item(
+            sku_code=sku_code,
+            name=name,
+            model_code=payload.model_code.strip(),
+            width_cm=int(payload.width_cm),
+            fabric_code=payload.fabric_code.strip(),
+            color_code=payload.color_code.strip(),
+            is_active=1 if payload.is_active else 0,
+        )
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.")
+    return {"status": "ok", "id": sku_id}
+
+
+@app.put("/api/kiosk/sku/{sku_id}")
+async def sku_update(sku_id: int, payload: SkuUpdateRequest):
+    """
+    Редактирует SKU (только имя и активность), только мастер.
+    """
+    ensure_master_mode()
+    update_sku_catalog_item(
+        sku_id=sku_id,
+        name=payload.name.strip() if payload.name is not None else None,
+        is_active=1 if payload.is_active else (0 if payload.is_active is False else None),
+    )
+    return {"status": "ok"}
 
 
 @app.get("/api/kiosk/pack/plan")

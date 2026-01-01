@@ -4,6 +4,7 @@
   const API_MASTER_LOGIN_URL = "/api/kiosk/master/login";
   const API_MASTER_LOGOUT_URL = "/api/kiosk/master/logout";
   const API_SETTINGS_URL = "/api/kiosk/settings";
+  const API_SKU_URL = "/api/kiosk/sku";
 
   // UI-элементы мастера: кнопки, модалка, статус.
   const btnMasterLogin = document.getElementById("btnMasterLogin");
@@ -30,8 +31,27 @@
   const btnMasterLogoutSettings = document.getElementById("btnMasterLogoutSettings");
   const settingsHint = document.getElementById("settingsHint");
 
+  // Каталог SKU: элементы управления и модалка.
+  const skuCatalogList = document.getElementById("skuCatalogList");
+  const skuCatalogSearch = document.getElementById("skuCatalogSearch");
+  const btnSkuAdd = document.getElementById("btnSkuAdd");
+  const skuCatalogModalBackdrop = document.getElementById("skuCatalogModalBackdrop");
+  const skuCatalogModalTitle = document.getElementById("skuCatalogModalTitle");
+  const skuCatalogModalActions = document.getElementById("skuCatalogModalActions");
+  const skuCatalogModalCancel = document.getElementById("skuCatalogModalCancel");
+  const skuModelCode = document.getElementById("skuModelCode");
+  const skuWidthCm = document.getElementById("skuWidthCm");
+  const skuFabricCode = document.getElementById("skuFabricCode");
+  const skuColorCode = document.getElementById("skuColorCode");
+  const skuName = document.getElementById("skuName");
+  const skuIsActive = document.getElementById("skuIsActive");
+  const skuPreviewValue = document.getElementById("skuPreviewValue");
+
   let masterModalOpen = false;
   let currentMasterId = null;
+  let skuModalOpen = false;
+  let skuModalMode = "create";
+  let skuEditingId = null;
 
   function setMasterUi(masterId) {
     /**
@@ -54,6 +74,11 @@
     currentMasterId = masterId || null;
     updateSettingsAvailability();
     updateManagementTabVisibility();
+    if (masterId) {
+      fetchSkuCatalog();
+    } else {
+      clearSkuCatalog();
+    }
   }
 
   window.syncMasterState = (masterId) => {
@@ -66,6 +91,11 @@
     currentMasterId = masterId || null;
     updateSettingsAvailability();
     updateManagementTabVisibility();
+    if (currentMasterId) {
+      fetchSkuCatalog();
+    } else {
+      clearSkuCatalog();
+    }
   };
 
   function updateManagementTabVisibility() {
@@ -126,6 +156,17 @@
     }
   }
 
+  function clearSkuCatalog() {
+    /**
+     * Очищаем список SKU, если мастер-режим выключен.
+     *
+     * Это не даёт оператору видеть каталог, который доступен только мастеру.
+     */
+    if (skuCatalogList) {
+      skuCatalogList.innerHTML = "";
+    }
+  }
+
   function applySettingsToUi(settings) {
     /**
      * Синхронизируем чекбоксы с настройками backend.
@@ -178,6 +219,9 @@
       if (data && data.settings) {
         applySettingsToUi(data.settings);
       }
+      if (data && data.master_mode && data.master_id) {
+        setMasterUi(data.master_id);
+      }
     } catch (error) {
       // Молча игнорируем сетевые ошибки, чтобы не мешать оператору.
     }
@@ -222,6 +266,228 @@
     } catch (error) {
       window.showPackToast?.("Ошибка сети: настройки не сохранены.");
       await fetchSettings();
+    }
+  }
+
+  function buildSkuPreview() {
+    /**
+     * Собираем SKU в простом формате без сложных шаблонов.
+     *
+     * Это MVP: показываем мастеру наглядный код без хитрых правил.
+     */
+    const model = (skuModelCode?.value || "").trim();
+    const width = (skuWidthCm?.value || "").trim();
+    const fabric = (skuFabricCode?.value || "").trim();
+    const color = (skuColorCode?.value || "").trim();
+    const parts = [model, width, fabric, color].filter(Boolean);
+    const result = parts.join("-");
+    if (skuPreviewValue) {
+      skuPreviewValue.textContent = result || "—";
+    }
+    return result;
+  }
+
+  function setSkuFormDisabled(disabled) {
+    /**
+     * При редактировании блокируем поля, которые нельзя менять.
+     *
+     * Так мы защищаем sku_code от случайного изменения.
+     */
+    const fields = [skuModelCode, skuWidthCm, skuFabricCode, skuColorCode];
+    fields.forEach((field) => {
+      if (!field) return;
+      field.disabled = disabled;
+    });
+  }
+
+  function openSkuModal(mode, item = null) {
+    skuModalOpen = true;
+    skuModalMode = mode;
+    skuEditingId = item ? item.id : null;
+    if (skuCatalogModalBackdrop) {
+      skuCatalogModalBackdrop.classList.add("open");
+      skuCatalogModalBackdrop.setAttribute("aria-hidden", "false");
+    }
+    if (skuCatalogModalTitle) {
+      skuCatalogModalTitle.textContent = mode === "edit" ? "Редактировать SKU" : "Добавить SKU";
+    }
+    if (skuCatalogModalActions) {
+      skuCatalogModalActions.innerHTML = "";
+      skuCatalogModalActions.appendChild(
+        makeCatalogActionButton("Сохранить", "success", () => saveSkuModal())
+      );
+    }
+    if (mode === "edit" && item) {
+      if (skuModelCode) skuModelCode.value = item.model_code || "";
+      if (skuWidthCm) skuWidthCm.value = String(item.width_cm || "");
+      if (skuFabricCode) skuFabricCode.value = item.fabric_code || "";
+      if (skuColorCode) skuColorCode.value = item.color_code || "";
+      if (skuName) skuName.value = item.name || "";
+      if (skuIsActive) skuIsActive.checked = !!item.is_active;
+      setSkuFormDisabled(true);
+      if (skuPreviewValue) {
+        skuPreviewValue.textContent = item.sku_code || "—";
+      }
+    } else {
+      if (skuModelCode) skuModelCode.value = "";
+      if (skuWidthCm) skuWidthCm.value = "";
+      if (skuFabricCode) skuFabricCode.value = "";
+      if (skuColorCode) skuColorCode.value = "";
+      if (skuName) skuName.value = "";
+      if (skuIsActive) skuIsActive.checked = true;
+      setSkuFormDisabled(false);
+      buildSkuPreview();
+    }
+  }
+
+  function closeSkuModal() {
+    skuModalOpen = false;
+    if (skuCatalogModalBackdrop) {
+      skuCatalogModalBackdrop.classList.remove("open");
+      skuCatalogModalBackdrop.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  function makeCatalogActionButton(text, kind, onClick) {
+    /**
+     * Кнопки модалки — такие же pill-кнопки, чтобы стиль был единым.
+     */
+    const btn = document.createElement("div");
+    btn.className = "pill-btn";
+    if (kind === "danger") {
+      btn.classList.add("pill-btn--danger");
+    }
+    if (kind === "primary" || kind === "success") {
+      btn.classList.add("pill-btn--primary");
+    }
+    btn.innerHTML = `<span class="dot"></span><span>${text}</span>`;
+    btn.addEventListener("click", () => onClick());
+    return btn;
+  }
+
+  async function fetchSkuCatalog() {
+    /**
+     * Загружаем список SKU (для мастера).
+     *
+     * Мы включаем неактивные записи, чтобы можно было ими управлять.
+     */
+    if (!currentMasterId) return;
+    const query = (skuCatalogSearch?.value || "").trim();
+    const url = new URL(API_SKU_URL, window.location.origin);
+    if (query) {
+      url.searchParams.set("q", query);
+    }
+    url.searchParams.set("include_inactive", "true");
+    try {
+      const resp = await fetch(url.toString(), { cache: "no-store" });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      renderSkuCatalog(data.items || []);
+    } catch (error) {
+      // Сетевые ошибки не блокируют UI, просто оставляем список как есть.
+    }
+  }
+
+  function renderSkuCatalog(items) {
+    if (!skuCatalogList) return;
+    skuCatalogList.innerHTML = "";
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "settings-hint";
+      empty.textContent = "Пока нет SKU. Добавьте первую запись.";
+      skuCatalogList.appendChild(empty);
+      return;
+    }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "sku-catalog-row";
+
+      const code = document.createElement("div");
+      code.className = "sku-catalog-title";
+      code.textContent = item.sku_code || "—";
+
+      const name = document.createElement("div");
+      name.className = "sku-catalog-meta";
+      name.innerHTML = `<div>${item.name || "—"}</div><div>${item.model_code || ""} • ${item.width_cm || ""} см • ${item.fabric_code || ""} • ${item.color_code || ""}</div>`;
+
+      const status = document.createElement("div");
+      status.className = "sku-catalog-meta";
+      status.textContent = item.is_active ? "Активен" : "Неактивен";
+
+      const actions = document.createElement("div");
+      actions.className = "sku-catalog-actions";
+      const editBtn = document.createElement("div");
+      editBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
+      editBtn.innerHTML = "<span class=\"dot\"></span><span>Редактировать</span>";
+      editBtn.addEventListener("click", () => openSkuModal("edit", item));
+      actions.appendChild(editBtn);
+
+      row.appendChild(code);
+      row.appendChild(name);
+      row.appendChild(status);
+      row.appendChild(actions);
+      skuCatalogList.appendChild(row);
+    });
+  }
+
+  async function saveSkuModal() {
+    /**
+     * Создаём или обновляем SKU.
+     *
+     * В режиме редактирования меняем только имя и активность.
+     */
+    if (skuModalMode === "edit" && skuEditingId) {
+      const payload = {
+        name: (skuName?.value || "").trim(),
+        is_active: !!skuIsActive?.checked,
+      };
+      try {
+        const resp = await fetch(`${API_SKU_URL}/${skuEditingId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          window.showPackToast?.("Не удалось сохранить SKU.");
+          return;
+        }
+        closeSkuModal();
+        fetchSkuCatalog();
+      } catch (error) {
+        window.showPackToast?.("Ошибка сети: SKU не сохранён.");
+      }
+      return;
+    }
+
+    const skuCode = buildSkuPreview();
+    const payload = {
+      sku_code: skuCode,
+      name: (skuName?.value || "").trim(),
+      model_code: (skuModelCode?.value || "").trim(),
+      width_cm: parseInt(skuWidthCm?.value || "0", 10),
+      fabric_code: (skuFabricCode?.value || "").trim(),
+      color_code: (skuColorCode?.value || "").trim(),
+      is_active: !!skuIsActive?.checked,
+    };
+    if (!payload.sku_code || !payload.name) {
+      window.showPackToast?.("Заполните код SKU и название.");
+      return;
+    }
+    try {
+      const resp = await fetch(API_SKU_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({}));
+        window.showPackToast?.(detail.detail || "Не удалось добавить SKU.");
+        return;
+      }
+      closeSkuModal();
+      fetchSkuCatalog();
+    } catch (error) {
+      window.showPackToast?.("Ошибка сети: SKU не добавлен.");
     }
   }
 
@@ -363,6 +629,9 @@
     if (event.key === "Escape" && masterModalOpen) {
       closeMasterModal();
     }
+    if (event.key === "Escape" && skuModalOpen) {
+      closeSkuModal();
+    }
   });
 
   function initMainTabs() {
@@ -437,8 +706,23 @@
     });
   }
 
+  if (skuCatalogSearch) {
+    skuCatalogSearch.addEventListener("input", () => fetchSkuCatalog());
+  }
+  if (btnSkuAdd) {
+    btnSkuAdd.addEventListener("click", () => openSkuModal("create"));
+  }
+  if (skuCatalogModalCancel) {
+    skuCatalogModalCancel.addEventListener("click", () => closeSkuModal());
+  }
+  [skuModelCode, skuWidthCm, skuFabricCode, skuColorCode].forEach((field) => {
+    if (!field) return;
+    field.addEventListener("input", () => buildSkuPreview());
+  });
+
   // Стартовая синхронизация настроек.
   updateSettingsAvailability();
   fetchSettings();
   initMainTabs();
+  fetchSkuCatalog();
 })();
