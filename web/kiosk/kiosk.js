@@ -244,9 +244,7 @@
       if (data && data.settings) {
         applySettingsToUi(data.settings);
       }
-      if (data && data.master_mode && data.master_id) {
-        setMasterUi(data.master_id);
-      }
+      setMasterUi((data && data.master_mode) ? (data.master_id || null) : null);
     } catch (error) {
       // Молча игнорируем сетевые ошибки, чтобы не мешать оператору.
     }
