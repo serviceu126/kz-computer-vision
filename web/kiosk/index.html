@@ -545,6 +545,17 @@
       background: rgba(15, 23, 42, 0.35);
     }
 
+    /* Блок мастера: отдельная строка статуса + скрытие кнопки выхода. */
+    .master-status {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    .master-hidden {
+      display: none;
+    }
+
     .pack-card {
       padding: 14px 18px;
       display: flex;
@@ -1055,6 +1066,8 @@
           Сегодня: 0 кроватей, простоев 0 мин
         </div>
         <div class="card-sub" id="workerScanHint"></div> <!-- НОВАЯ СТРОКА -->
+        <!-- Статус мастера: показываем, кто имеет доступ к ручным действиям. -->
+        <div class="master-status" id="masterStatus">Мастер: —</div>
 
         <div class="action-row">
           <div id="btnAddWorker" class="action-pill" role="button" tabindex="0">
@@ -1064,6 +1077,14 @@
           <div id="btnEndShift" class="action-pill" role="button" tabindex="0">
             <span class="dot"></span>
             <span>Завершить смену</span>
+          </div>
+          <div id="btnMasterLogin" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Войти как мастер</span>
+          </div>
+          <div id="btnMasterLogout" class="action-pill master-hidden" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Выйти из режима мастера</span>
           </div>
         </div>
       </div>
@@ -1407,6 +1428,32 @@
   </div>
 </div>
 
+<!-- Модалка входа мастера -->
+<div id="masterLoginBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div>
+        <div class="modal-title">Вход мастера</div>
+        <div class="modal-sub">Отсканируйте QR-код мастера формата M########.</div>
+      </div>
+      <div class="modal-scan">
+        <div style="flex:1;">
+          QR: <input id="masterLoginInput" type="text" placeholder="Например, M13540876"
+                     style="width:100%; background:transparent; border:none; color:#e0f2fe; font-size:15px;">
+        </div>
+        <div id="masterLoginHint" style="font-size:13px; color: var(--text-muted);">Ожидание сканирования…</div>
+      </div>
+      <div class="modal-actions" id="masterLoginActions"></div>
+      <div class="modal-footer">
+        <div id="masterLoginCancel" class="action-pill modal-cancel-pill" role="button" tabindex="0">
+          <span class="dot"></span>
+          <span>ОТМЕНА</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   const API_STATE_URL = "/api/kiosk/state";
   const API_PACK_UI_STATE_URL = "/api/kiosk/pack/ui-state";
@@ -1564,6 +1611,18 @@
     } else {
       const nums = workers.map(w => w.replace(/^W/i, "")).join(", ");
       document.getElementById("workerName").textContent = `Команда: ${nums}`;
+    }
+
+    // Режим мастера: показываем ID и управляем кнопкой выхода.
+    // Это чисто UI-логика: только отображаем то, что пришло из backend.
+    const masterStatusEl = document.getElementById("masterStatus");
+    const btnMasterLogout = document.getElementById("btnMasterLogout");
+    const masterId = state.master_id || null;
+    if (masterStatusEl) {
+      masterStatusEl.textContent = masterId ? `Мастер: ${masterId}` : "Мастер: —";
+    }
+    if (btnMasterLogout) {
+      btnMasterLogout.classList.toggle("master-hidden", !masterId);
     }
 
     // Кнопки смены (белая/зелёная)
@@ -2944,5 +3003,7 @@ function mkModalBtn(text, kind, onClick) {
     }
   });
 </script>
+<!-- Дополнительный скрипт для режима мастера: отделяем логику, чтобы HTML был чище. -->
+<script src="/static/kiosk.js"></script>
 </body>
 </html>

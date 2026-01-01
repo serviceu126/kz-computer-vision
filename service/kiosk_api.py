@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Literal
+import re
 import json
 import time
 
@@ -110,6 +111,11 @@ class KioskState(BaseModel):
     camera_stream_url: str="http://127.0.0.1:8080/stream"
     overlay_slots: List[OverlaySlot]
 
+    # Режим мастера (супервайзер).
+    # Нужен только для UI, чтобы подсветить, кто имеет право на ручные действия.
+    master_mode: bool = False
+    master_id: Optional[str] = None
+
 
 class StartSessionRequest(BaseModel):
     worker_id: Optional[str] = None
@@ -162,6 +168,16 @@ class ShiftPlanSelectRequest(BaseModel):
     plan_id: int
 
 
+class MasterLoginRequest(BaseModel):
+    qr_text: str
+
+
+# Храним ID мастера в памяти сервиса.
+# Это простой и прозрачный подход: UI не зависит от базы, а состояние
+# сбрасывается при перезапуске сервиса, что безопасно для доступа.
+MASTER_STATE = {"id": None}
+
+
 app = FastAPI(title="KZ Kiosk API")
 
 app.mount(
@@ -179,6 +195,7 @@ async def root():
 @app.get("/api/kiosk/state", response_model=KioskState)
 async def get_state():
     ui: KioskUIState = engine.get_ui_state()
+    master_id = MASTER_STATE["id"]
     return KioskState(
         worker_name=ui.worker_name,
         shift_label=ui.shift_label,
@@ -239,7 +256,41 @@ async def get_state():
             )
             for o in ui.overlay_slots
         ],
+        master_mode=bool(master_id),
+        master_id=master_id,
     )
+
+
+@app.post("/api/kiosk/master/login")
+async def master_login(payload: MasterLoginRequest):
+    """
+    Вход в режим мастера по QR-коду.
+
+    Формат:
+    - буква M и 8 цифр (например, M13540876).
+    Почему так:
+    - формат легко распознаётся сканером;
+    - мы быстро валидируем его без внешних сервисов.
+    """
+    qr_text = (payload.qr_text or "").strip()
+    if not re.fullmatch(r"M\d{8}", qr_text):
+        raise HTTPException(
+            status_code=400,
+            detail="Неверный QR мастера. Ожидается формат M######## (например, M13540876).",
+        )
+    MASTER_STATE["id"] = qr_text
+    return {"status": "ok", "master_id": qr_text}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout():
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    MASTER_STATE["id"] = None
+    return {"status": "ok"}
 
 
 @app.post("/api/kiosk/session/start")
