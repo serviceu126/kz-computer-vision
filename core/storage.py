@@ -438,6 +438,57 @@ def update_sku_catalog_item(
     conn.close()
 
 
+def clear_master_session() -> None:
+    """
+    Отключает мастер-режим.
+
+    Мы очищаем master_id и таймштамп, чтобы UI видел пустое состояние.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE kiosk_master_session
+           SET master_id=NULL, last_active_ts=NULL, enabled=0
+           WHERE id=1"""
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_master_last_active(last_active_ts: int) -> None:
+    """
+    Обновляет время последней активности мастера.
+
+    Этот метод вызываем при любых мастер-действиях,
+    чтобы таймаут отсчитывался корректно.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE kiosk_master_session
+           SET last_active_ts=?
+           WHERE id=1 AND enabled=1""",
+        [int(last_active_ts)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_kiosk_settings(keys: list[str]) -> dict[str, int]:
+    # Массовое чтение настроек.
+    # Это ускоряет UI-запросы и упрощает обработку.
+    conn = get_conn()
+    cur = conn.cursor()
+    placeholders = ",".join("?" for _ in keys)
+    cur.execute(
+        f"SELECT key, value FROM kiosk_settings WHERE key IN ({placeholders})",
+        keys,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return {row["key"]: int(row["value"] or 0) for row in (rows or [])}
+
+
 def save_session(session) -> int:
     conn = get_conn()
     cur = conn.cursor()

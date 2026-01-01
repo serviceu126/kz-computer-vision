@@ -345,6 +345,31 @@ async def get_state():
         master_mode=bool(master_id),
         master_id=master_id,
     )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/master/login")

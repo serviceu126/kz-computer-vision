@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <title>Киоск упаковки кроватей</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/static/kiosk.css" />
   <style>
     :root {
       --bg: #050816;
@@ -192,6 +193,7 @@
     .panel-body {
       position: relative;
       z-index: 1;
+      margin-bottom: var(--space-sm);
     }
 
     .panel-title {
@@ -935,7 +937,7 @@
       overflow: auto;
     }
 
-    .shift-plan-row {
+    .shift-plan-catalog-list {
       display: grid;
       grid-template-columns: 1fr auto auto auto auto auto;
       gap: var(--space-xs);
@@ -1592,6 +1594,7 @@
               Отчёты обновляются автоматически при поступлении данных.
             </div>
           </div>
+          <div class="steps-list" id="stepsList"></div>
         </div>
       </div>
     </div>
