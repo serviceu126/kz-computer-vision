@@ -228,10 +228,18 @@ body:not(.is-master-active) .screen--master {
 }
 
 /* Структура блока "Управление / Настройки": делаем ясные секции и отступы. */
+#settingsCard {
+  /* Делаем панель настроек компактной и центрированной, чтобы не растягивать на весь экран. */
+  max-width: 1000px;
+  width: 100%;
+  margin: var(--space-3xl) auto 0;
+}
+
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
+  /* Ровный вертикальный ритм: строки не липнут друг к другу. */
+  gap: var(--space-md);
   margin-top: var(--space-lg);
 }
 
@@ -251,6 +259,7 @@ body:not(.is-master-active) .screen--master {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  line-height: 1.4;
 }
 
 /* Строка для числового поля таймаута: подпись и поле выровнены. */
@@ -258,6 +267,7 @@ body:not(.is-master-active) .screen--master {
   display: grid;
   grid-template-columns: minmax(180px, 260px) minmax(140px, 1fr);
   align-items: center;
+  /* Чёткое расстояние между подписью и полем ввода. */
   gap: var(--space-md);
 }
 
