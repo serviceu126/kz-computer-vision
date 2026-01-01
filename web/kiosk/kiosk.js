@@ -79,7 +79,7 @@
       settingMasterTimeout.disabled = !enabled;
     }
     if (btnSettingsSave) {
-      btnSettingsSave.classList.toggle("disabled", !enabled);
+      btnSettingsSave.classList.toggle("pill-btn--disabled", !enabled);
     }
     if (settingsHint) {
       settingsHint.textContent = enabled
@@ -210,9 +210,12 @@
      * Это сохраняет единый стиль и снижает когнитивную нагрузку.
      */
     const btn = document.createElement("div");
-    btn.className = "action-pill";
-    if (kind) {
-      btn.classList.add(`modal-${kind}`);
+    btn.className = "pill-btn";
+    if (kind === "danger") {
+      btn.classList.add("pill-btn--danger");
+    }
+    if (kind === "primary" || kind === "success") {
+      btn.classList.add("pill-btn--primary");
     }
     btn.innerHTML = `<span class="dot"></span><span>${text}</span>`;
     btn.setAttribute("role", "button");
@@ -317,7 +320,7 @@
   }
   if (btnSettingsSave) {
     btnSettingsSave.addEventListener("click", () => {
-      if (btnSettingsSave.classList.contains("disabled")) {
+      if (btnSettingsSave.classList.contains("pill-btn--disabled")) {
         return;
       }
       saveSettings();

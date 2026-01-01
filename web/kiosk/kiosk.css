@@ -1,34 +1,111 @@
 /* Общие переопределения и дополнения стилей для киоска.
-   Этот файл нужен, чтобы вынести новые правки из HTML
-   и поддерживать единый внешний вид кнопок и вкладок. */
+   Этот файл содержит только компонентные классы,
+   чтобы UI оставался единым и предсказуемым. */
+
+/* Список утверждённых компонентных классов:
+   - panel / panel-header / panel-title / panel-title--compact / panel-main / panel-main--compact / panel-body: базовая карточка.
+   - panel--camera / panel--instruction / panel--pack / panel--shift-plan / panel--settings / panel--steps / panel--events / panel--stats: варианты панели.
+   - pill-btn / pill-btn--primary / pill-btn--danger / pill-btn--ghost / pill-btn--active / pill-btn--disabled / pill-btn--mini: кнопки-пилюли.
+   - pill-row / pill-row--start: ряды кнопок.
+   - tabbar / tab / tab--active: вкладки.
+   - modal / modal-backdrop / modal-content / modal-title / modal-sub / modal-scan / modal-actions / modal-actions--footer: модальные окна.
+   - modal-hint / modal-input / modal-input-wrap: элементы модалки.
+   - settings-row / settings-label / settings-input / settings-hint: блок настроек.
+   - steps-summary-row / text-muted-sm / stats-note: вспомогательные текстовые элементы.
+   - pack-row / pack-main / pack-hint / pack-state-chip / pack-current-step / pack-current-step-title / pack-current-step-value / pack-available / pack-manual-note / pack-steps-preview / pack-step-line / pack-toast: упаковочный блок.
+   - shift-plan-rename / shift-plan-controls / shift-plan-input / shift-plan-qty / shift-plan-catalog / shift-plan-catalog-list / shift-plan-list / shift-plan-row: сменный план.
+   - manual-controls / master-status / master-hidden / scan-debug: состояния интерфейса.
+   - app / logo-bar / logo-img / top-bar / middle / right-column / bottom: каркас страницы.
+   - badge / dot / status-pill / status-ok / status-warn / status-error: статусные метки.
+   - timer / timers / timer-chip / timer-chip-label / timer-chip-value: таймеры.
+   - camera-frame / camera-image / camera-overlay / camera-caption / slot / slot-title / slot-status: камера и подсветка.
+   - steps-list / step-row / step-index / step-title / step-meta: список шагов.
+   - events-list / event-row / event-time / event-text: список событий.
+   - stats-row / stats-label / stats-value: статистика.
+   - status-strip / status-strip.warn / status-strip.error: полоска состояния.
+   Эти классы перечислены здесь, чтобы избежать случайных "одноразовых" стилей. */
 
 /* Делаем модалки шире для лучшей читаемости. */
 .modal {
-  width: min(1400px, 98vw);
+  width: min(var(--modal-max-width), 98vw);
 }
 
-/* Панель вкладок в блоке управления. */
-.settings-tabs {
+/* Вкладки в блоке управления. */
+.tabbar {
   display: flex;
-  gap: 8px;
+  gap: var(--space-sm);
   flex-wrap: wrap;
 }
 
-.settings-tab {
+.tab {
   opacity: 0.7;
 }
 
-.settings-tab.active {
+.tab--active {
   opacity: 1;
 }
 
 /* Элементы формы в настройках. */
 .settings-input {
   width: 100%;
-  border-radius: 10px;
-  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  border: var(--border-default);
   background: rgba(2, 6, 23, 0.55);
   color: var(--text-main);
-  padding: 6px 8px;
-  font-size: 13px;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-sm);
+}
+
+.settings-label {
+  min-width: var(--size-settings-label);
+}
+
+.modal-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--info-text);
+  font-size: var(--font-lg);
+}
+
+.modal-input-wrap {
+  flex: 1;
+}
+
+.modal-hint {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.modal-actions--footer {
+  justify-content: flex-end;
+}
+
+.steps-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-xs);
+}
+
+.text-muted-sm {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.stats-note {
+  margin-top: var(--space-sm);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.scan-debug {
+  position: fixed;
+  left: var(--debug-offset-x);
+  bottom: var(--debug-offset-y);
+  font-size: var(--font-2xs);
+  color: var(--neutral-700);
+  opacity: 0.8;
+  pointer-events: none;
+  z-index: 9999;
 }
