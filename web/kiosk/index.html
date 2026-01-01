@@ -4,18 +4,118 @@
   <meta charset="UTF-8" />
   <title>Киоск упаковки кроватей</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/static/kiosk.css" />
   <style>
     :root {
       --bg: #050816;
-      --card-bg: #0f172a;
       --accent: #22c55e;
       --accent-soft: rgba(34, 197, 94, 0.15);
       --error: #ef4444;
       --warn: #facc15;
+      --warn-strong: #f97316;
+      --accent-strong: #4ade80;
+      --error-strong: #b91c1c;
       --text-main: #e5e7eb;
       --text-muted: #9ca3af;
       --border-soft: #1f2937;
+      --info: #38bdf8;
+      --info-strong: #0ea5e9;
+      --info-soft: rgba(56, 189, 248, 0.7);
+      --info-bg: rgba(8, 47, 73, 0.85);
+      --info-text: var(--info-text);
+      --neutral-200: #e5e7eb;
+      --success-text: #bbf7d0;
+      --success-soft: #6ee7b7;
+      --success-bg: rgba(22, 101, 52, 0.85);
+      --danger-bg: rgba(127, 29, 29, 0.4);
+      --danger-text: #fecaca;
+      --danger-soft: #fca5a5;
+      --neutral-700: #6b7280;
+      --neutral-900: #020617;
+      --neutral-950: #050816;
+      --bg-top: #111827;
+      --surface-panel-gradient-start: rgba(15, 23, 42, 0.96);
+      --surface-panel-gradient-end: rgba(15, 23, 42, 0.9);
+      --surface-panel-modal-start: rgba(15, 23, 42, 0.98);
+      --surface-panel-modal-end: rgba(15, 23, 42, 0.92);
+      --surface-panel-soft: rgba(15, 23, 42, 0.55);
+      --surface-panel-ghost: rgba(15, 23, 42, 0.35);
+      --surface-panel-strong: rgba(15, 23, 42, 0.9);
+      --surface-slot: rgba(15, 23, 42, 0.6);
+      --surface-panel-note: rgba(15, 23, 42, 0.4);
+      --surface-deep: rgba(2, 6, 23, 0.55);
+      --surface-deep-strong: rgba(2, 6, 23, 0.72);
+      --surface-info-soft: rgba(8, 47, 73, 0.55);
+      --surface-info-accent: rgba(14, 165, 233, 0.14);
+      --surface-success: rgba(16, 185, 129, 0.15);
+      --surface-warn: rgba(250, 204, 21, 0.14);
+      --surface-error: rgba(239, 68, 68, 0.18);
+      --surface-info-pill: rgba(56, 189, 248, 0.14);
+      --surface-danger-pill: rgba(239, 68, 68, 0.16);
       --radius: 18px;
+      --radius-sm: 10px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-pill: 999px;
+      --radius-panel: 18px;
+      --space-3xs: 2px;
+      --space-2xs: 4px;
+      --space-xs: 6px;
+      --space-sm: 8px;
+      --space-md: 10px;
+      --space-lg: 12px;
+      --space-xl: 14px;
+      --space-2xl: 16px;
+      --space-3xl: 18px;
+      --space-4xl: 20px;
+      --space-5xl: 22px;
+      --space-6xl: 24px;
+      --shadow-panel: 0 18px 40px rgba(0, 0, 0, 0.45);
+      --shadow-soft: 0 10px 18px rgba(0, 0, 0, 0.55);
+      --shadow-pill: 0 0 12px rgba(16, 185, 129, 0.18);
+      --shadow-pill-danger: 0 0 12px rgba(239, 68, 68, 0.18);
+      --shadow-pill-primary: 0 0 12px rgba(56, 189, 248, 0.18);
+      --shadow-status: 0 0 6px var(--accent);
+      --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
+      --shadow-slot-current: 0 0 18px rgba(56, 189, 248, 0.8);
+      --shadow-step-current: 0 0 10px rgba(56, 189, 248, 0.6);
+      --shadow-dot-info: 0 0 6px rgba(56, 189, 248, 0.9);
+      --shadow-dot-danger: 0 0 6px var(--error);
+      --border-default: 1px solid var(--border-soft);
+      --border-pill: 1px solid rgba(148, 163, 184, 0.55);
+      --border-accent: 1px solid rgba(16, 185, 129, 0.75);
+      --border-warn: 1px solid rgba(250, 204, 21, 0.7);
+      --border-error: 1px solid rgba(239, 68, 68, 0.8);
+      --border-muted: 1px solid rgba(148, 163, 184, 0.35);
+      --border-danger-soft: 1px solid rgba(239, 68, 68, 0.6);
+      --border-badge: 1px solid rgba(148, 163, 184, 0.5);
+      --border-success: 1px solid rgba(16, 185, 129, 0.6);
+      --border-slot: 2px dashed rgba(148, 163, 184, 0.7);
+      --border-muted-strong: 1px solid rgba(148, 163, 184, 0.6);
+      --border-info-soft: 1px solid rgba(56, 189, 248, 0.35);
+      --border-info-strong: 1px solid rgba(56, 189, 248, 0.8);
+      --border-ghost: 1px solid rgba(148, 163, 184, 0.4);
+      --dot-disabled: rgba(148, 163, 184, 0.6);
+      --border-primary: 1px solid rgba(56, 189, 248, 0.75);
+      --border-danger: 1px solid rgba(239, 68, 68, 0.75);
+      --font-xs: 12px;
+      --font-sm: 13px;
+      --font-md: 14px;
+      --font-lg: 16px;
+      --font-xl: 18px;
+      --font-2xl: 22px;
+      --font-3xl: 26px;
+      --font-4xl: 32px;
+      --font-2xs: 11px;
+      --size-pack-min: 280px;
+      --size-events-min: 140px;
+      --size-step-index: 26px;
+      --size-catalog-min: 110px;
+      --size-settings-label: 220px;
+      --blur-md: 6px;
+      --modal-max-width: 1400px;
+      --debug-offset-x: 8px;
+      --debug-offset-y: 6px;
     }
 
     * {
@@ -26,7 +126,7 @@
 
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: radial-gradient(circle at top, #111827 0, #020617 40%, #020617 100%);
+      background: radial-gradient(circle at top, var(--bg-top) 0, var(--neutral-900) 40%, var(--neutral-900) 100%);
       color: var(--text-main);
       height: 100vh;
       overflow: hidden;
@@ -36,8 +136,8 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
-      padding: 16px 20px;
-      gap: 16px;
+      padding: var(--space-2xl) var(--space-4xl);
+      gap: var(--space-2xl);
     }
 
     /* ЛОГОТИП */
@@ -45,145 +145,159 @@
     .logo-bar {
       display: flex;
       align-items: center;
-      padding: 4px 4px 0 4px;
-      margin-bottom: 4px;
+      padding: var(--space-2xs) var(--space-2xs) 0 var(--space-2xs);
+      margin-bottom: var(--space-2xs);
     }
 
     .logo-img {
-      height: 44px;
+      height: calc(var(--space-6xl) + var(--space-2xs));
       opacity: 0.95;
-      filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55));
+      filter: drop-shadow(var(--shadow-soft));
     }
 
     .top-bar {
       display: grid;
       grid-template-columns: 1.3fr 1.3fr 1.4fr;
-      gap: 16px;
+      gap: var(--space-2xl);
       align-items: stretch;
     }
 
-    .card {
-      background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.9));
-      border-radius: var(--radius);
-      border: 1px solid var(--border-soft);
-      padding: 14px 18px;
-      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    .panel {
+      background: linear-gradient(145deg, var(--surface-panel-gradient-start), var(--surface-panel-gradient-end));
+      border-radius: var(--radius-panel);
+      border: var(--border-default);
+      padding: var(--space-xl) var(--space-3xl);
+      box-shadow: var(--shadow-panel);
       position: relative;
       overflow: hidden;
     }
 
-    .card::before {
+    .panel::before {
       content: "";
       position: absolute;
       inset: -40%;
       opacity: 0.08;
       background:
-        radial-gradient(circle at 0 0, #22c55e, transparent 55%),
-        radial-gradient(circle at 100% 0, #38bdf8, transparent 55%);
+        radial-gradient(circle at 0 0, var(--accent), transparent 55%),
+        radial-gradient(circle at 100% 0, var(--info), transparent 55%);
       pointer-events: none;
     }
 
-    .card-content {
+    .panel-header {
+      position: relative;
+      z-index: 1;
+      margin-bottom: var(--space-sm);
+    }
+
+    .panel-body {
       position: relative;
       z-index: 1;
     }
 
-    .card-title {
-      font-size: 14px;
+    .panel-title {
+      font-size: var(--font-sm);
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--text-muted);
-      margin-bottom: 8px;
+      margin-bottom: var(--space-sm);
     }
 
-    .card-main {
-      font-size: 22px;
+    .panel-title--compact {
+      margin-bottom: var(--space-xs);
+    }
+
+    .panel-main {
+      font-size: var(--font-2xl);
       font-weight: 600;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
 
+    .panel-main--compact {
+      margin-bottom: var(--space-2xs);
+    }
+
     /* Только для карточки "Текущая кровать": делаем SKU одной большой строкой */
 .bed-mainline {
   display: block;          /* не ломаем сетку, просто отдельная строка */
-  font-size: 26px;         /* крупнее, чем обычный card-main (22px) */
+  font-size: var(--font-3xl);         /* крупнее, чем обычный panel-main */
   font-weight: 700;
   line-height: 1.15;
 }
 
 
-    .card-sub {
-      font-size: 15px;
+    .panel-sub {
+      font-size: var(--font-lg);
       color: var(--text-muted);
-      margin-top: 4px;
+      margin-top: var(--space-2xs);
     }
 
     .badge {
-      font-size: 13px;
-      border-radius: 999px;
-      padding: 4px 10px;
-      border: 1px solid rgba(148, 163, 184, 0.5);
+      font-size: var(--font-sm);
+      border-radius: var(--radius-pill);
+      padding: var(--space-2xs) var(--space-md);
+      border: var(--border-badge);
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: var(--space-xs);
     }
 
     .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
+      width: var(--space-sm);
+      height: var(--space-sm);
+      border-radius: var(--radius-pill);
       background: var(--accent);
-      box-shadow: 0 0 6px var(--accent);
+      box-shadow: var(--shadow-status);
     }
 
     .status-pill {
-      font-size: 14px;
-      border-radius: 999px;
-      padding: 4px 12px;
+      font-size: var(--font-md);
+      border-radius: var(--radius-pill);
+      padding: var(--space-2xs) var(--space-lg);
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--space-sm);
       font-weight: 500;
     }
 
     .status-ok {
-      background: rgba(16, 185, 129, 0.15);
-      color: #6ee7b7;
-      border: 1px solid rgba(16, 185, 129, 0.6);
+      background: var(--surface-success);
+      color: var(--success-soft);
+      border: var(--border-success);
     }
 
     .status-warn {
-      background: rgba(250, 204, 21, 0.14);
-      color: #facc15;
-      border: 1px solid rgba(250, 204, 21, 0.7);
+      background: var(--surface-warn);
+      color: var(--warn);
+      border: var(--border-warn);
     }
 
     .status-error {
-      background: rgba(239, 68, 68, 0.18);
-      color: #fca5a5;
-      border: 1px solid rgba(239, 68, 68, 0.8);
+      background: var(--surface-error);
+      color: var(--danger-soft);
+      border: var(--border-error);
     }
 
     .timer {
       font-variant-numeric: tabular-nums;
-      font-size: 26px;
+      font-size: var(--font-3xl);
       font-weight: 600;
     }
 
     .timers {
       display: flex;
-      gap: 16px;
-      margin-top: 6px;
-      font-size: 13px;
+      gap: var(--space-2xl);
+      margin-top: var(--space-xs);
+      font-size: var(--font-sm);
     }
 
     .timer-chip {
       flex: 1;
-      border-radius: 999px;
-      padding: 4px 10px;
-      border: 1px solid var(--border-soft);
-      background: rgba(15, 23, 42, 0.9);
+      border-radius: var(--radius-pill);
+      padding: var(--space-2xs) var(--space-md);
+      border: var(--border-default);
+      background: var(--surface-panel-strong);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -201,25 +315,25 @@
     .middle {
       display: grid;
       grid-template-columns: 3.2fr 1fr;
-      gap: 16px;
+      gap: var(--space-2xl);
       flex: 1;
       min-height: 0;
     }
 
-    .camera-card {
-      padding: 10px;
+    .panel--camera {
+      padding: var(--space-md);
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: var(--space-md);
     }
 
     .camera-frame {
       position: relative;
       flex: 1;
-      border-radius: 16px;
+      border-radius: var(--radius-lg);
       overflow: hidden;
-      background: #020617;
-      border: 1px solid var(--border-soft);
+      background: var(--neutral-900);
+      border: var(--border-default);
     }
 
     .camera-image {
@@ -238,27 +352,27 @@
 
     .slot {
       position: absolute;
-      border-radius: 12px;
-      border: 2px dashed rgba(148, 163, 184, 0.7);
-      background: rgba(15, 23, 42, 0.6);
+      border-radius: var(--radius-md);
+      border: var(--border-slot);
+      background: var(--surface-slot);
       display: flex;
       flex-direction: column;
       justify-content: center;
       align-items: center;
       text-align: center;
-      padding: 4px;
-      font-size: 12px;
+      padding: var(--space-2xs);
+      font-size: var(--font-xs);
       color: var(--text-muted);
       transition: all 0.2s ease-out;
     }
 
     .slot-title {
       font-weight: 500;
-      margin-bottom: 2px;
+      margin-bottom: var(--space-3xs);
     }
 
     .slot-status {
-      font-size: 11px;
+      font-size: var(--font-2xs);
     }
 
     .slot.pending {
@@ -269,18 +383,18 @@
     .slot.current {
       opacity: 1;
       border-style: solid;
-      border-color: #38bdf8;
-      background: rgba(8, 47, 73, 0.85);
-      box-shadow: 0 0 18px rgba(56, 189, 248, 0.8);
-      color: #e0f2fe;
+      border-color: var(--info);
+      background: var(--info-bg);
+      box-shadow: var(--shadow-slot-current);
+      color: var(--info-text);
     }
 
     .slot.done {
       opacity: 0.9;
       border-style: solid;
-      border-color: #22c55e;
-      background: rgba(22, 101, 52, 0.85);
-      color: #bbf7d0;
+      border-color: var(--accent);
+      background: var(--success-bg);
+      color: var(--success-text);
     }
 
     .slot.done .slot-status::before {
@@ -288,11 +402,11 @@
     }
 
     .camera-caption {
-      font-size: 13px;
+      font-size: var(--font-sm);
       color: var(--text-muted);
       display: flex;
       justify-content: space-between;
-      gap: 12px;
+      gap: var(--space-lg);
     }
 
     .camera-caption span {
@@ -301,97 +415,97 @@
       text-overflow: ellipsis;
     }
 
-    .instruction-card {
+    .panel--instruction {
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      padding: 18px 22px;
+      padding: var(--space-3xl) var(--space-5xl);
     }
 
     .instruction-main {
-      font-size: 32px;
+      font-size: var(--font-4xl);
       font-weight: 700;
-      margin-bottom: 8px;
+      margin-bottom: var(--space-sm);
     }
 
     .instruction-sub {
-      font-size: 19px;
+      font-size: var(--font-xl);
       color: var(--text-muted);
-      margin-bottom: 18px;
+      margin-bottom: var(--space-3xl);
     }
 
     .instruction-extra {
-      font-size: 15px;
+      font-size: var(--font-lg);
       color: var(--text-muted);
     }
 
     .big-icon {
-      font-size: 34px;
-      margin-right: 10px;
+      font-size: calc(var(--font-4xl) + var(--space-2xs));
+      margin-right: var(--space-md);
     }
 
-    .steps-card {
-      padding: 16px 18px;
+    .panel--steps {
+      padding: var(--space-2xl) var(--space-3xl);
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: var(--space-2xl);
     }
 
     .progress-bar {
       width: 100%;
-      height: 10px;
-      border-radius: 999px;
-      background: #020617;
+      height: var(--space-md);
+      border-radius: var(--radius-pill);
+      background: var(--neutral-900);
       overflow: hidden;
-      border: 1px solid var(--border-soft);
+      border: var(--border-default);
     }
 
     .progress-fill {
       height: 100%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #22c55e, #4ade80);
+      border-radius: var(--radius-pill);
+      background: linear-gradient(90deg, var(--accent), var(--accent-strong));
       width: 0%;
       transition: width 0.25s ease-out;
     }
 
     .steps-list {
-      margin-top: 6px;
+      margin-top: var(--space-xs);
       max-height: 100%;
-      overflow: hidden;
+      overflow: auto;
     }
 
     .step-row {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 5px 0;
-      font-size: 15px;
+      gap: var(--space-md);
+      padding: var(--space-xs) 0;
+      font-size: var(--font-lg);
     }
 
     .step-index {
-      width: 26px;
-      height: 26px;
-      border-radius: 999px;
+      width: var(--size-step-index);
+      height: var(--size-step-index);
+      border-radius: var(--radius-pill);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 13px;
-      background: #020617;
-      border: 1px solid var(--border-soft);
+      font-size: var(--font-sm);
+      background: var(--neutral-900);
+      border: var(--border-default);
       color: var(--text-muted);
     }
 
     .step-row.done .step-index {
       background: var(--accent-soft);
       border-color: var(--accent);
-      color: #bbf7d0;
+      color: var(--success-text);
     }
 
     .step-row.current .step-index {
-      background: #0ea5e9;
-      border-color: #38bdf8;
-      color: #e0f2fe;
-      box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+      background: var(--info-strong);
+      border-color: var(--info);
+      color: var(--info-text);
+      box-shadow: var(--shadow-step-current);
     }
 
     .step-title {
@@ -399,55 +513,55 @@
     }
 
     .step-meta {
-      font-size: 13px;
+      font-size: var(--font-sm);
       color: var(--text-muted);
     }
 
     .bottom {
       display: grid;
       grid-template-columns: 2.2fr 1.6fr;
-      gap: 16px;
+      gap: var(--space-2xl);
       align-items: stretch;
     }
 
-    .events-card {
-      padding: 10px 16px;
+    .panel--events {
+      padding: var(--space-md) var(--space-2xl);
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      min-height: 140px;
+      gap: var(--space-xs);
+      min-height: var(--size-events-min);
     }
 
     .events-list {
-      font-size: 13px;
+      font-size: var(--font-sm);
       flex: 1;
       overflow: hidden;
     }
 
     .event-row {
       display: flex;
-      gap: 8px;
-      padding: 2px 0;
+      gap: var(--space-sm);
+      padding: var(--space-3xs) 0;
       color: var(--text-muted);
     }
 
     .event-time {
       font-variant-numeric: tabular-nums;
-      width: 60px;
-      color: #6b7280;
+      width: calc(var(--space-6xl) * 2 + var(--space-sm));
+      color: var(--neutral-700);
     }
 
     .event-text {
       flex: 1;
     }
 
-    .stats-card {
-      padding: 10px 16px;
-      font-size: 13px;
+    .panel--stats {
+      padding: var(--space-md) var(--space-2xl);
+      font-size: var(--font-sm);
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      min-height: 140px;
+      gap: var(--space-xs);
+      min-height: var(--size-events-min);
     }
 
     .stats-row {
@@ -468,172 +582,215 @@
       position: fixed;
       inset-inline: 0;
       bottom: 0;
-      height: 4px;
-      background: linear-gradient(90deg, #22c55e, #4ade80);
+      height: var(--space-2xs);
+      background: linear-gradient(90deg, var(--accent), var(--accent-strong));
       opacity: 0.9;
       transition: background 0.2s ease-out;
     }
 
     .status-strip.warn {
-      background: linear-gradient(90deg, #facc15, #f97316);
+      background: linear-gradient(90deg, var(--warn), var(--warn-strong));
     }
 
     .status-strip.error {
-      background: linear-gradient(90deg, #ef4444, #b91c1c);
+      background: linear-gradient(90deg, var(--error), var(--error-strong));
     }
 
-    /* Кнопки в верхней карточке (как "Ожидание") */
-    .action-row {
-      margin-top: 10px;
+    /* Ряд для кнопок-пилюль. */
+    .pill-row {
+      margin-top: var(--space-md);
       display: flex;
-      gap: 10px;
+      gap: var(--space-md);
       justify-content: flex-end;
       flex-wrap: wrap;
     }
 
-    .action-pill {
+    .pill-row--start {
+      justify-content: flex-start;
+    }
+
+    /* Базовая кнопка-пилюля (единый стиль по дизайн-системе). */
+    .pill-btn {
       cursor: pointer;
       user-select: none;
-      border-radius: 999px;
-      padding: 6px 12px;
+      border-radius: var(--radius-pill);
+      padding: var(--space-xs) var(--space-lg);
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      font-size: 14px;
+      gap: var(--space-sm);
+      font-size: var(--font-md);
       font-weight: 500;
-      border: 1px solid rgba(148, 163, 184, 0.55);
-      background: rgba(15, 23, 42, 0.55);
+      border: var(--border-pill);
+      background: var(--surface-panel-soft);
       color: var(--text-main);
       transition: transform 0.06s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
     }
 
-    .action-pill:active {
-      transform: translateY(1px);
+    .pill-btn:active {
+      transform: translateY(var(--space-3xs));
     }
 
-    .action-pill .dot {
-      background: #e5e7eb;
+    .pill-btn .dot {
+      background: var(--neutral-200);
       box-shadow: none;
     }
 
-    .action-pill.active {
-      background: rgba(16, 185, 129, 0.15);
-      border-color: rgba(16, 185, 129, 0.75);
-      box-shadow: 0 0 12px rgba(16, 185, 129, 0.18);
+    .pill-btn--active {
+      background: var(--surface-success);
+      border: var(--border-accent);
+      box-shadow: var(--shadow-pill);
     }
 
-    .action-pill.active .dot {
+    .pill-btn--active .dot {
       background: var(--accent);
-      box-shadow: 0 0 6px var(--accent);
+      box-shadow: var(--shadow-status);
     }
 
-    .action-pill.disabled {
+    .pill-btn--disabled {
       opacity: 0.45;
       cursor: not-allowed;
       filter: grayscale(0.2);
       box-shadow: none;
     }
 
-    .action-pill.disabled .dot {
-      background: rgba(148, 163, 184, 0.6);
+    .pill-btn--disabled .dot {
+      background: var(--dot-disabled);
       box-shadow: none;
     }
 
-    .action-pill.manual-pill {
+    .pill-btn--ghost {
       opacity: 0.78;
-      border-color: rgba(148, 163, 184, 0.4);
-      background: rgba(15, 23, 42, 0.35);
+      border-color: var(--border-ghost);
+      background: var(--surface-panel-ghost);
     }
 
-    .pack-card {
-      padding: 14px 18px;
+    .pill-btn--primary {
+      background: var(--surface-info-pill);
+      border: var(--border-primary);
+      box-shadow: var(--shadow-pill-primary);
+    }
+
+    .pill-btn--primary .dot {
+      background: var(--info);
+      box-shadow: var(--shadow-dot-info);
+    }
+
+    .pill-btn--danger {
+      background: var(--surface-danger-pill);
+      border: var(--border-danger);
+      box-shadow: var(--shadow-pill-danger);
+    }
+
+    .pill-btn--danger .dot {
+      background: var(--error);
+      box-shadow: var(--shadow-dot-danger);
+    }
+
+    .pill-btn--mini {
+      padding: var(--space-2xs) var(--space-sm);
+      font-size: var(--font-sm);
+    }
+
+    /* Блок мастера: отдельная строка статуса + скрытие кнопки выхода. */
+    .master-status {
+      font-size: var(--font-md);
+      color: var(--text-muted);
+      margin-top: var(--space-xs);
+    }
+
+    .master-hidden {
+      display: none;
+    }
+
+    .panel--pack {
+      padding: var(--space-xl) var(--space-3xl);
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: var(--space-lg);
       width: 100%;
-      min-width: 280px;
-        flex: 1.4;
-  min-height: 0;
+      min-width: var(--size-pack-min);
+      flex: 1.4;
+      min-height: 0;
     }
 
     .pack-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: var(--space-md);
       align-items: center;
       justify-content: space-between;
     }
 
     .pack-main {
-      font-size: 24px;
+      font-size: var(--font-3xl);
       font-weight: 700;
     }
 
     .pack-hint {
-      margin-top: 6px;
-      font-size: 16px;
+      margin-top: var(--space-xs);
+      font-size: var(--font-lg);
       color: var(--text-main);
     }
 
     .pack-state-chip {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(148, 163, 184, 0.6);
-      font-size: 13px;
+      gap: var(--space-sm);
+      padding: var(--space-2xs) var(--space-md);
+      border-radius: var(--radius-pill);
+      border: var(--border-muted-strong);
+      font-size: var(--font-sm);
       color: var(--text-muted);
     }
 
     .pack-meta {
-      font-size: 14px;
+      font-size: var(--font-md);
       color: var(--text-muted);
     }
 
     .pack-current-step {
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid var(--border-soft);
-      background: rgba(2, 6, 23, 0.55);
+      padding: var(--space-md) var(--space-lg);
+      border-radius: var(--radius-md);
+      border: var(--border-default);
+      background: var(--surface-deep);
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: var(--space-2xs);
     }
 
     .pack-current-step-title {
-      font-size: 13px;
+      font-size: var(--font-sm);
       color: var(--text-muted);
       letter-spacing: 0.02em;
       text-transform: uppercase;
     }
 
     .pack-current-step-value {
-      font-size: 18px;
+      font-size: var(--font-xl);
       font-weight: 600;
     }
 
     .pack-available {
-      font-size: 12px;
+      font-size: var(--font-xs);
       color: var(--text-muted);
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: var(--space-2xs);
     }
 
     .pack-manual-note {
-      border-radius: 12px;
-      border: 1px solid rgba(148, 163, 184, 0.35);
-      background: rgba(15, 23, 42, 0.4);
-      padding: 8px 10px;
-      font-size: 12px;
+      border-radius: var(--radius-md);
+      border: var(--border-muted);
+      background: var(--surface-panel-note);
+      padding: var(--space-sm) var(--space-md);
+      font-size: var(--font-xs);
       color: var(--text-muted);
     }
 
     .manual-controls {
       display: none;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: var(--space-md);
     }
 
     .manual-controls.open {
@@ -643,17 +800,17 @@
     /* ВАЖНО: упаковка должна быть визуально важнее прогресса.
        Поэтому только этот блок может растягиваться по высоте,
        чтобы оператор всегда видел основное состояние и текущий шаг. */
-    .pack-card {
+    .panel--pack {
       flex: 1 1 auto;
       min-height: 0;
     }
 
     /* Прогресс показываем компактно: оператору важнее текущее действие,
        поэтому ограничиваем рост по высоте и не даём блоку "расползаться". */
-    .steps-card {
+    .panel--steps {
       flex: 0 0 auto;
-      min-height: 110px;
-      max-height: 160px;
+      min-height: calc(var(--space-6xl) + var(--space-2xs));
+      max-height: calc(var(--space-6xl) + var(--space-4xl));
     }
 
     /* Контейнер правой колонки:
@@ -662,129 +819,175 @@
     .right-column {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: var(--space-lg);
       min-height: 0;
       height: 100%;
     }
 
     /* Компактный блок сменного задания:
        он информирует, но не должен забирать вертикальное пространство. */
-    .shift-plan-card {
+    .panel--shift-plan {
       flex: 0 0 auto;
     }
 
     /* Блок "Текущая команда":
        высота строго по содержимому, чтобы не конкурировать с упаковкой. */
-    .instruction-card {
+    .panel--instruction {
       flex: 0 0 auto;
     }
 
     .pack-steps-preview {
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      font-size: 14px;
+      gap: var(--space-xs);
+      font-size: var(--font-md);
     }
 
     .pack-step-line {
       display: flex;
       justify-content: space-between;
-      gap: 12px;
-      padding: 6px 10px;
-      border-radius: 12px;
-      border: 1px solid var(--border-soft);
-      background: rgba(2, 6, 23, 0.55);
+      gap: var(--space-lg);
+      padding: var(--space-xs) var(--space-md);
+      border-radius: var(--radius-md);
+      border: var(--border-default);
+      background: var(--surface-deep);
     }
 
     .pack-step-line.current {
-      border-color: rgba(56, 189, 248, 0.8);
-      background: rgba(8, 47, 73, 0.55);
-      color: #e0f2fe;
+      border-color: var(--border-info-strong);
+      background: var(--surface-info-soft);
+      color: var(--info-text);
     }
 
     /* Блок сменного задания: компактные элементы ввода и список SKU. */
+    .shift-plan-rename {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: var(--space-sm);
+      align-items: center;
+      margin-top: var(--space-xs);
+    }
+
     .shift-plan-controls {
       display: grid;
       grid-template-columns: 1fr auto auto;
-      gap: 8px;
+      gap: var(--space-sm);
       align-items: center;
-      margin-top: 6px;
+      margin-top: var(--space-xs);
     }
 
     .shift-plan-input {
       width: 100%;
-      border-radius: 10px;
-      border: 1px solid var(--border-soft);
-      background: rgba(2, 6, 23, 0.55);
+      border-radius: var(--radius-sm);
+      border: var(--border-default);
+      background: var(--surface-deep);
       color: var(--text-main);
-      padding: 6px 8px;
-      font-size: 13px;
+      padding: var(--space-xs) var(--space-sm);
+      font-size: var(--font-sm);
     }
 
     .shift-plan-qty {
-      max-width: 90px;
+      max-width: calc(var(--space-6xl) * 2);
+    }
+
+    .shift-plan-catalog {
+      margin-top: var(--space-sm);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xs);
+    }
+
+    .shift-plan-catalog-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(var(--size-catalog-min), 1fr));
+      gap: var(--space-xs);
+      max-height: calc(var(--space-6xl) * 2);
+      overflow: auto;
+    }
+
+    .shift-plan-catalog-list .pill-btn {
+      justify-content: center;
+    }
+
+    .shift-plan-catalog-list .pill-btn:hover {
+      border-color: var(--info-soft);
+      color: var(--info-text);
     }
 
     .shift-plan-list {
-      margin-top: 8px;
+      margin-top: var(--space-sm);
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      max-height: 160px;
-      overflow: hidden;
+      gap: var(--space-xs);
+      max-height: calc(var(--space-6xl) * 3);
+      overflow: auto;
     }
 
     .shift-plan-row {
       display: grid;
-      grid-template-columns: 1fr auto auto auto auto;
-      gap: 6px;
+      grid-template-columns: 1fr auto auto auto auto auto;
+      gap: var(--space-xs);
       align-items: center;
-      padding: 6px 8px;
-      border-radius: 10px;
-      border: 1px solid var(--border-soft);
-      background: rgba(2, 6, 23, 0.55);
-      font-size: 13px;
+      padding: var(--space-xs) var(--space-sm);
+      border-radius: var(--radius-sm);
+      border: var(--border-default);
+      background: var(--surface-deep);
+      font-size: var(--font-sm);
     }
 
     .shift-plan-row.selected {
-      border-color: rgba(56, 189, 248, 0.7);
-      background: rgba(8, 47, 73, 0.55);
-      color: #e0f2fe;
+      border-color: var(--info-soft);
+      background: var(--surface-info-soft);
+      color: var(--info-text);
     }
 
-    .shift-plan-mini-btn {
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid rgba(148, 163, 184, 0.55);
-      background: rgba(15, 23, 42, 0.55);
+    
+
+    /* Блок настроек: компактные чекбоксы, чтобы не ломать верстку. */
+    .panel--settings {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      font-size: var(--font-md);
       color: var(--text-main);
-      font-size: 12px;
-      cursor: pointer;
     }
 
-    .shift-plan-mini-btn.disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
+    .settings-hint {
+      font-size: var(--font-xs);
+      color: var(--text-muted);
     }
+
+    .settings-row input[type="checkbox"] {
+      width: var(--space-2xl);
+      height: var(--space-2xl);
+    }
+
+    
 
     .shift-plan-modal-input {
       background: transparent;
       border: none;
-      color: #e0f2fe;
-      font-size: 15px;
+      color: var(--info-text);
+      font-size: var(--font-lg);
     }
 
     .shift-plan-modal-textarea {
       width: 100%;
       background: transparent;
       border: none;
-      color: #e0f2fe;
-      font-size: 14px;
+      color: var(--info-text);
+      font-size: var(--font-md);
       resize: vertical;
     }
 
     .shift-plan-modal-hint {
-      font-size: 13px;
+      font-size: var(--font-sm);
       color: var(--text-muted);
     }
 
@@ -794,13 +997,13 @@
     }
 
     .pack-toast {
-      margin-top: 8px;
-      padding: 8px 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(239, 68, 68, 0.6);
-      background: rgba(127, 29, 29, 0.4);
-      color: #fecaca;
-      font-size: 14px;
+      margin-top: var(--space-sm);
+      padding: var(--space-sm) var(--space-lg);
+      border-radius: var(--radius-md);
+      border: var(--border-danger-soft);
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      font-size: var(--font-md);
       display: none;
     }
 
@@ -808,13 +1011,13 @@
     .modal-backdrop {
       position: fixed;
       inset: 0;
-      background: rgba(2, 6, 23, 0.72);
-      backdrop-filter: blur(6px);
+      background: var(--surface-deep-strong);
+      backdrop-filter: blur(var(--blur-md));
       display: none;
       align-items: center;
       justify-content: center;
       z-index: 9998;
-      padding: 22px;
+      padding: var(--space-5xl);
     }
 
     .modal-backdrop.open {
@@ -822,29 +1025,15 @@
     }
 
     .modal {
-      width: min(1200px, 96vw);
-      border-radius: var(--radius);
-      border: 1px solid var(--border-soft);
-      background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.92));
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
-      padding: 18px 20px;
+      width: min(var(--modal-max-width), 96vw);
+      border-radius: var(--radius-panel);
+      border: var(--border-default);
+      background: linear-gradient(145deg, var(--surface-panel-modal-start), var(--surface-panel-modal-end));
+      box-shadow: var(--shadow-modal);
+      padding: var(--space-3xl) var(--space-4xl);
       position: relative;
       overflow: hidden;
     }
-
-    /* ─────────────────────────────────────────────
-   МОДАЛКА: низ (footer) и "ОТМЕНА" справа внизу
-   ───────────────────────────────────────────── */
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;   /* прижимаем вправо */
-  margin-top: 10px;
-}
-
-/* "ОТМЕНА" — тоже пилюля как везде */
-.modal-cancel-pill {
-  cursor: pointer;
-}
 
 
     .modal::before {
@@ -853,8 +1042,8 @@
       inset: -40%;
       opacity: 0.10;
       background:
-        radial-gradient(circle at 0 0, #22c55e, transparent 55%),
-        radial-gradient(circle at 100% 0, #38bdf8, transparent 55%);
+        radial-gradient(circle at 0 0, var(--accent), transparent 55%),
+        radial-gradient(circle at 100% 0, var(--info), transparent 55%);
       pointer-events: none;
     }
 
@@ -863,128 +1052,56 @@
       z-index: 1;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: var(--space-lg);
     }
 
     .modal-title {
-      font-size: 14px;
+      font-size: var(--font-sm);
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--text-muted);
     }
 
     .modal-main {
-      font-size: 26px;
+      font-size: var(--font-3xl);
       font-weight: 700;
       line-height: 1.15;
     }
 
     .modal-sub {
-      font-size: 16px;
+      font-size: var(--font-lg);
       color: var(--text-muted);
     }
 
     .modal-scan {
-      margin-top: 4px;
-      border-radius: 16px;
-      border: 1px solid var(--border-soft);
-      background: rgba(2, 6, 23, 0.55);
-      padding: 12px 14px;
+      margin-top: var(--space-2xs);
+      border-radius: var(--radius-lg);
+      border: var(--border-default);
+      background: var(--surface-deep);
+      padding: var(--space-lg) var(--space-xl);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 12px;
+      gap: var(--space-lg);
       font-variant-numeric: tabular-nums;
     }
 
     .modal-scan code {
-      color: #e0f2fe;
-      font-size: 15px;
-      background: rgba(14, 165, 233, 0.14);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      padding: 3px 8px;
-      border-radius: 10px;
+      color: var(--info-text);
+      font-size: var(--font-lg);
+      background: var(--surface-info-accent);
+      border: var(--border-info-soft);
+      padding: var(--space-3xs) var(--space-sm);
+      border-radius: var(--radius-sm);
     }
 
     .modal-actions {
       display: flex;
-      gap: 10px;
+      gap: var(--space-md);
       flex-wrap: wrap;
-      justify-content: flex-start;
-      margin-top: 6px;
+      justify-content: flex-end;
+      margin-top: var(--space-xs);
     }
-
-    .modal-btn {
-      cursor: pointer;
-      border-radius: 999px;
-      padding: 8px 14px;
-      border: 1px solid rgba(148, 163, 184, 0.55);
-      background: rgba(15, 23, 42, 0.55);
-      color: var(--text-main);
-      font-weight: 600;
-      font-size: 14px;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .modal-btn.primary {
-      border-color: rgba(56, 189, 248, 0.8);
-      background: rgba(8, 47, 73, 0.65);
-      box-shadow: 0 0 16px rgba(56, 189, 248, 0.18);
-    }
-
-    .modal-btn.success {
-      border-color: rgba(16, 185, 129, 0.75);
-      background: rgba(22, 101, 52, 0.55);
-      box-shadow: 0 0 16px rgba(16, 185, 129, 0.14);
-    }
-
-    .modal-btn.danger {
-      border-color: rgba(239, 68, 68, 0.75);
-      background: rgba(127, 29, 29, 0.35);
-      box-shadow: 0 0 16px rgba(239, 68, 68, 0.14);
-    }
-
-   /* ─────────────────────────────────────────────
-   Варианты action-pill для модалки:
-   - modal-success: зелёная
-   - modal-danger: красная
-   - modal-primary: синяя
-   ───────────────────────────────────────────── */
-
-.action-pill.modal-success {
-  background: rgba(16, 185, 129, 0.15);
-  border-color: rgba(16, 185, 129, 0.75);
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.18);
-}
-
-.action-pill.modal-success .dot {
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
-}
-
-.action-pill.modal-danger {
-  background: rgba(239, 68, 68, 0.16);
-  border-color: rgba(239, 68, 68, 0.75);
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.18);
-}
-
-.action-pill.modal-danger .dot {
-  background: var(--error);
-  box-shadow: 0 0 6px var(--error);
-}
-
-.action-pill.modal-primary {
-  background: rgba(56, 189, 248, 0.14);
-  border-color: rgba(56, 189, 248, 0.75);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.18);
-}
-
-.action-pill.modal-primary .dot {
-  background: #38bdf8;
-  box-shadow: 0 0 6px rgba(56, 189, 248, 0.9);
-}
  
   </style>
 </head>
@@ -996,55 +1113,71 @@
 
   <!-- Верх -->
   <div class="top-bar">
-    <div class="card">
-      <div class="card-content">
-        <div class="card-title">Сотрудник</div>
-        <div class="card-main">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Сотрудник</div>
+      </div>
+      <div class="panel-body">
+        <div class="panel-main">
           <span id="workerName">—</span>
           <span class="badge" id="shiftLabel">
             <span class="dot"></span>
             <span id="shiftInfo">Смена не выбрана</span>
           </span>
         </div>
-        <div class="card-sub" id="workerStats">
+        <div class="panel-sub" id="workerStats">
           Сегодня: 0 кроватей, простоев 0 мин
         </div>
-        <div class="card-sub" id="workerScanHint"></div> <!-- НОВАЯ СТРОКА -->
+        <div class="panel-sub" id="workerScanHint"></div> <!-- НОВАЯ СТРОКА -->
+        <!-- Статус мастера: показываем, кто имеет доступ к ручным действиям. -->
+        <div class="master-status" id="masterStatus">Мастер: —</div>
 
-        <div class="action-row">
-          <div id="btnAddWorker" class="action-pill" role="button" tabindex="0">
+        <div class="pill-row">
+          <div id="btnAddWorker" class="pill-btn" role="button" tabindex="0">
             <span class="dot"></span>
             <span>Добавить сотрудника</span>
           </div>
-          <div id="btnEndShift" class="action-pill" role="button" tabindex="0">
+          <div id="btnEndShift" class="pill-btn" role="button" tabindex="0">
             <span class="dot"></span>
             <span>Завершить смену</span>
+          </div>
+          <div id="btnMasterLogin" class="pill-btn" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Войти как мастер</span>
+          </div>
+          <div id="btnMasterLogout" class="pill-btn master-hidden" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Выйти (мастер)</span>
           </div>
         </div>
       </div>
     </div>
 
-<div class="card">
-  <div class="card-content">
-    <div class="card-title">Текущая кровать</div>
+    <div class="panel">
+  <div class="panel-header">
+    <div class="panel-title">Текущая кровать</div>
+  </div>
+  <div class="panel-body">
 
     <!-- Большая строка: SKU -->
-    <div class="card-main bed-mainline">
+    <div class="panel-main bed-mainline">
       <span id="bedSkuBig">SKU —</span>
     </div>
 
     <!-- Пояснение + детали -->
-    <div class="card-sub" id="bedDetails">
+    <div class="panel-sub" id="bedDetails">
       Модель — | Размер — | Цвет —
     </div>
   </div>
 </div>
 
 
-    <div class="card">
-      <div class="card-content">
-        <div class="card-title">Время упаковки</div>
-        <div class="card-main" style="margin-bottom:4px;">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Время упаковки</div>
+      </div>
+      <div class="panel-body">
+        <div class="panel-main panel-main--compact">
           <span class="timer" id="sessionTimer">00:00</span>
           <span id="statusPill" class="status-pill status-warn">
             <span class="dot"></span>
@@ -1067,24 +1200,30 @@
 
   <!-- Центр -->
   <div class="middle">
-    <div class="card camera-card">
-      <div class="card-title">Рабочий стол (вид сверху)</div>
-      <div class="camera-frame">
-        <img id="cameraImage" class="camera-image" src="" alt="Поток с камеры" />
-        <div id="cameraOverlay" class="camera-overlay"></div>
+    <div class="panel panel--camera">
+      <div class="panel-header">
+        <div class="panel-title">Рабочий стол (вид сверху)</div>
       </div>
-      <div class="camera-caption">
-        <span id="cameraHint">
-          Зона контроля: ~3.5–4.0×1.5 м. Следуйте подсветке деталей на столе.
-        </span>
-        <span id="workerStateLabel">Состояние: —</span>
+      <div class="panel-body">
+        <div class="camera-frame">
+          <img id="cameraImage" class="camera-image" src="" alt="Поток с камеры" />
+          <div id="cameraOverlay" class="camera-overlay"></div>
+        </div>
+        <div class="camera-caption">
+          <span id="cameraHint">
+            Зона контроля: ~3.5–4.0×1.5 м. Следуйте подсветке деталей на столе.
+          </span>
+          <span id="workerStateLabel">Состояние: —</span>
+        </div>
       </div>
     </div>
 
     <div class="right-column">
-      <div class="card instruction-card">
-        <div>
-          <div class="card-title">Текущая команда</div>
+      <div class="panel panel--instruction">
+        <div class="panel-header">
+          <div class="panel-title">Текущая команда</div>
+        </div>
+        <div class="panel-body">
           <div class="instruction-main">
             <span class="big-icon">🛠️</span>
             <span id="instructionMain">Ожидание начала упаковки…</span>
@@ -1092,162 +1231,237 @@
           <div class="instruction-sub" id="instructionSub">
             Выберите кровать и просканируйте QR-код для старта.
           </div>
-        </div>
-        <div class="instruction-extra" id="instructionExtra">
-          Голосовые подсказки дублируют текст. Работайте по голосу, на экран поглядывайте только при необходимости.
+          <div class="instruction-extra" id="instructionExtra">
+            Голосовые подсказки дублируют текст. Работайте по голосу, на экран поглядывайте только при необходимости.
+          </div>
         </div>
       </div>
 
-      <div class="card pack-card">
-        <div class="card-title">Упаковка</div>
-        <div class="pack-row">
-          <div class="pack-main" id="packStateLabel">Состояние: —</div>
-          <div class="pack-state-chip">
-            <span class="dot"></span>
-            <span id="packPhaseLabel">Фаза: —</span>
-          </div>
+      <div class="panel panel--pack">
+        <div class="panel-header">
+          <div class="panel-title">Упаковка</div>
         </div>
-        <div class="pack-hint" id="packHint">Сканируйте QR-код кровати (SKU) для старта.</div>
-
-        <div class="pack-current-step">
-          <div class="pack-current-step-title">Текущий шаг</div>
-          <div class="pack-current-step-value" id="packCurrentStep">—</div>
-        </div>
-
-        <div class="pack-available" id="packFlags">
-          <div>Доступно:</div>
-          <div>• —</div>
-        </div>
-
-        <div class="pack-manual-note">
-          <strong>Ручной режим:</strong> кнопки ниже предназначены только для супервайзера.
-        </div>
-
-        <div class="action-row" style="justify-content:flex-start;">
-          <div id="btnManualToggle" class="action-pill manual-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Ручной режим (супервайзер)</span>
-          </div>
-        </div>
-
-        <div class="action-row manual-controls" id="manualControls">
-          <div id="btnPackStart" class="action-pill manual-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Старт SKU (ручной режим)</span>
-          </div>
-          <div id="btnPackStepComplete" class="action-pill manual-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Шаг выполнен (ручной режим)</span>
-          </div>
-          <div id="btnPackPhaseNext" class="action-pill manual-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Следующая фаза (ручной режим)</span>
-          </div>
-          <div id="btnPackCloseBox" class="action-pill manual-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Закрыть коробку (ручной режим)</span>
-          </div>
-          <div id="btnPackPrintLabel" class="action-pill manual-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Печать этикетки (ручной режим)</span>
-          </div>
-          <div id="btnPackTableEmpty" class="action-pill manual-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Стол пустой (ручной режим)</span>
-          </div>
-        </div>
-
-        <div>
-          <div class="card-title" style="margin-bottom:6px;">Ближайшие шаги</div>
-          <div class="pack-steps-preview" id="packPlanPreview">
-            <div class="pack-step-line">
-              <span>План выкладки будет загружен автоматически</span>
-              <span>—</span>
+        <div class="panel-body">
+          <div class="pack-row">
+            <div class="pack-main" id="packStateLabel">Состояние: —</div>
+            <div class="pack-state-chip">
+              <span class="dot"></span>
+              <span id="packPhaseLabel">Фаза: —</span>
             </div>
           </div>
-          <div class="pack-toast" id="packToast"></div>
+          <div class="pack-hint" id="packHint">Сканируйте QR-код кровати (SKU) для старта.</div>
+
+          <div class="pack-current-step">
+            <div class="pack-current-step-title">Текущий шаг</div>
+            <div class="pack-current-step-value" id="packCurrentStep">—</div>
+          </div>
+
+          <div class="pack-available" id="packFlags">
+            <div>Доступно:</div>
+            <div>• —</div>
+          </div>
+
+          <div class="pack-manual-note">
+            <strong>Ручной режим:</strong> кнопки ниже предназначены только для супервайзера.
+          </div>
+
+          <div class="pill-row pill-row--start">
+            <div id="btnManualToggle" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Ручной режим (супервайзер)</span>
+            </div>
+          </div>
+
+          <div class="pill-row manual-controls" id="manualControls">
+            <div id="btnPackStart" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Старт SKU (ручной режим)</span>
+            </div>
+            <div id="btnPackStepComplete" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Шаг выполнен (ручной режим)</span>
+            </div>
+            <div id="btnPackPhaseNext" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Следующая фаза (ручной режим)</span>
+            </div>
+            <div id="btnPackCloseBox" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Закрыть коробку (ручной режим)</span>
+            </div>
+            <div id="btnPackPrintLabel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Печать этикетки (ручной режим)</span>
+            </div>
+            <div id="btnPackTableEmpty" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Стол пустой (ручной режим)</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="panel-title panel-title--compact">Ближайшие шаги</div>
+            <div class="pack-steps-preview" id="packPlanPreview">
+              <div class="pack-step-line">
+                <span>План выкладки будет загружен автоматически</span>
+                <span>—</span>
+              </div>
+            </div>
+            <div class="pack-toast" id="packToast"></div>
+          </div>
         </div>
       </div>
 
-<<<<<<< HEAD
-
-      <div class="card steps-card" style="flex:0.5; min-height:0;">
-
-      <div class="card" id="shiftPlanCard">
-=======
-      <div class="card shift-plan-card" id="shiftPlanCard">
->>>>>>> 3b7f80358a106710bc1525297817c6ef55d5a939
-        <div class="card-title">Сменное задание</div>
-        <div class="pack-meta" id="shiftPlanName">План не выбран</div>
-        <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
-        <div class="shift-plan-controls">
-          <input id="shiftPlanSkuInput" class="shift-plan-input" list="shiftPlanSkuCatalog"
-                 placeholder="SKU из каталога" />
-          <input id="shiftPlanQtyInput" class="shift-plan-input shift-plan-qty" type="number" min="1" value="1" />
-          <div id="btnShiftPlanAdd" class="action-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Добавить</span>
-          </div>
+      <div class="panel panel--shift-plan" id="shiftPlanCard">
+        <div class="panel-header">
+          <div class="panel-title">Сменное задание</div>
         </div>
-        <div class="action-row" style="justify-content:flex-start;">
-          <div id="btnShiftPlanRemoveSelected" class="action-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Удалить выбранное</span>
+        <div class="panel-body">
+          <div class="pack-meta" id="shiftPlanName">План не выбран</div>
+          <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
+          <div class="shift-plan-rename">
+            <input id="shiftPlanRenameInput" class="shift-plan-input" placeholder="Название плана для смены" />
+            <div id="btnShiftPlanRename" class="pill-btn" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Переименовать</span>
+            </div>
           </div>
-          <div id="btnShiftPlanUpload" class="action-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Загрузить список</span>
+          <div class="shift-plan-controls">
+            <input id="shiftPlanSkuInput" class="shift-plan-input" list="shiftPlanSkuCatalog"
+                   placeholder="SKU из каталога или вручную" />
+            <input id="shiftPlanQtyInput" class="shift-plan-input shift-plan-qty" type="number" min="1"
+                   value="1" placeholder="Количество" />
+            <div id="btnShiftPlanAdd" class="pill-btn" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Добавить</span>
+            </div>
           </div>
-          <div id="btnShiftPlanSelect" class="action-pill" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Выбрать из списка</span>
+          <div class="shift-plan-catalog">
+            <input id="shiftPlanCatalogSearch" class="shift-plan-input"
+                   placeholder="Поиск в каталоге SKU" />
+            <div class="shift-plan-catalog-list" id="shiftPlanCatalogList"></div>
           </div>
+          <div class="pill-row pill-row--start">
+            <div id="btnShiftPlanRemoveSelected" class="pill-btn" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Удалить выбранное</span>
+            </div>
+            <div id="btnShiftPlanMoveUp" class="pill-btn" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Вверх</span>
+            </div>
+            <div id="btnShiftPlanMoveDown" class="pill-btn" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Вниз</span>
+            </div>
+            <div id="btnShiftPlanUpload" class="pill-btn" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Редактировать список</span>
+            </div>
+            <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Выбрать из списка</span>
+            </div>
+          </div>
+          <div class="pack-meta">Текущий список на смену</div>
+          <div class="shift-plan-list" id="shiftPlanList"></div>
+          <datalist id="shiftPlanSkuCatalog"></datalist>
         </div>
-        <div class="pack-meta">Текущий список на смену</div>
-        <div class="shift-plan-list" id="shiftPlanList"></div>
-        <datalist id="shiftPlanSkuCatalog"></datalist>
       </div>
 
-      <div class="card steps-card">
-        <div>
-          <div class="card-title">Прогресс комплекта</div>
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <div class="panel panel--settings" id="settingsCard">
+        <div class="panel-header">
+          <div class="panel-title">Управление / Настройки</div>
+        </div>
+        <div class="panel-body">
+          <div class="tabbar">
+            <div class="pill-btn tab tab--active" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Управление</span>
+            </div>
+            <div class="pill-btn tab" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Настройки</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <input id="settingCanReorder" type="checkbox" />
+            <label for="settingCanReorder">Оператор может менять порядок очереди</label>
+          </div>
+          <div class="settings-row">
+            <input id="settingCanEditQty" type="checkbox" />
+            <label for="settingCanEditQty">Оператор может менять количество SKU</label>
+          </div>
+          <div class="settings-row">
+            <label for="settingMasterTimeout" class="settings-label">Таймаут мастера (мин)</label>
+            <input id="settingMasterTimeout" class="settings-input" type="number" min="1" max="240" value="15" />
+          </div>
+          <div class="pill-row pill-row--start">
+            <div id="btnSettingsSave" class="pill-btn" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Сохранить настройки</span>
+            </div>
+            <div id="btnMasterLogoutSettings" class="pill-btn master-hidden" role="button" tabindex="0">
+              <span class="dot"></span>
+              <span>Выйти (мастер)</span>
+            </div>
+          </div>
+          <div class="settings-hint" id="settingsHint">
+            Настройки доступны только мастеру. Перед изменением войдите как мастер.
+          </div>
+        </div>
+      </div>
+
+      <div class="panel panel--steps">
+        <div class="panel-header">
+          <div class="panel-title">Прогресс комплекта</div>
+        </div>
+        <div class="panel-body">
+          <div class="steps-summary-row">
             <div id="stepsSummary">Шаг 0 из 0</div>
-            <div style="font-size:13px; color:var(--text-muted);" id="stepsCounters">
+            <div class="text-muted-sm" id="stepsCounters">
               0 проверено, 0 ошибок
             </div>
           </div>
           <div class="progress-bar">
             <div class="progress-fill" id="progressFill"></div>
           </div>
+          <div class="steps-list" id="stepsList"></div>
         </div>
-        <div class="steps-list" id="stepsList"></div>
       </div>
     </div>
   </div>
 
   <!-- Низ -->
   <div class="bottom">
-    <div class="card events-card">
-      <div class="card-title">Последние события</div>
-      <div class="events-list" id="eventsList"></div>
+    <div class="panel panel--events">
+      <div class="panel-header">
+        <div class="panel-title">Последние события</div>
+      </div>
+      <div class="panel-body">
+        <div class="events-list" id="eventsList"></div>
+      </div>
     </div>
-    <div class="card stats-card">
-      <div class="card-title">Статистика по упаковке этой кровати</div>
-      <div class="stats-row">
-        <span class="stats-label">Последняя упаковка</span>
-        <span class="stats-value" id="lastPack">—</span>
+    <div class="panel panel--stats">
+      <div class="panel-header">
+        <div class="panel-title">Статистика по упаковке этой кровати</div>
       </div>
-      <div class="stats-row">
-        <span class="stats-label">Лучшее время</span>
-        <span class="stats-value" id="bestPack">—</span>
-      </div>
-      <div class="stats-row">
-        <span class="stats-label">Среднее время</span>
-        <span class="stats-value" id="avgPack">—</span>
-      </div>
-      <div style="margin-top:8px; font-size:12px; color:var(--text-muted);">
-        Время считается по завершённым сессиям упаковки этой модели (по SKU).
+      <div class="panel-body">
+        <div class="stats-row">
+          <span class="stats-label">Последняя упаковка</span>
+          <span class="stats-value" id="lastPack">—</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Лучшее время</span>
+          <span class="stats-value" id="bestPack">—</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Среднее время</span>
+          <span class="stats-value" id="avgPack">—</span>
+        </div>
+        <div class="stats-note">
+          Время считается по завершённым сессиям упаковки этой модели (по SKU).
+        </div>
       </div>
     </div>
   </div>
@@ -1258,30 +1472,27 @@
 <!-- Модальные окна для смен/РЦ -->
 <div id="shiftModalBackdrop" class="modal-backdrop" aria-hidden="true">
   <div class="modal" role="dialog" aria-modal="true">
-<!-- Заголовок модального окна -->
-<div>
-  <div class="modal-title" id="shiftModalTitle">Смена</div>
-  <div class="modal-sub" id="shiftModalSub">Просканируйте QR-код сотрудника.</div>
-</div>
-
-<!-- НИЗ модалки: кнопка ОТМЕНА справа внизу -->
-<div class="modal-footer">
-  <!-- ВАЖНО: делаем стиль как "Добавить сотрудника" (action-pill) -->
-  <div id="shiftModalCancel" class="action-pill modal-cancel-pill" role="button" tabindex="0">
-    <span class="dot"></span>
-    <span>ОТМЕНА</span>
-  </div>
-</div>
-
+    <!-- Заголовок модального окна -->
+    <div>
+      <div class="modal-title" id="shiftModalTitle">Смена</div>
+      <div class="modal-sub" id="shiftModalSub">Просканируйте QR-код сотрудника.</div>
+    </div>
 
     <div class="modal-scan">
       <div>
         Скан: <code id="shiftModalScan">—</code>
       </div>
-      <div id="shiftModalHint" style="font-size:13px; color: var(--text-muted);">Ожидание сканирования…</div>
+      <div id="shiftModalHint" class="modal-hint">Ожидание сканирования…</div>
     </div>
 
     <div class="modal-actions" id="shiftModalActions"></div>
+
+    <div class="modal-actions modal-actions--footer">
+      <div id="shiftModalCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+        <span class="dot"></span>
+        <span>ОТМЕНА</span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1294,15 +1505,14 @@
         <div class="modal-sub">Введите или отсканируйте SKU для запуска упаковки.</div>
       </div>
       <div class="modal-scan">
-        <div style="flex:1;">
-          SKU: <input id="packModalSku" type="text" placeholder="Например, SKU-1"
-                      style="width:100%; background:transparent; border:none; color:#e0f2fe; font-size:15px;">
+        <div class="modal-input-wrap">
+          SKU: <input id="packModalSku" class="modal-input" type="text" placeholder="Например, SKU-1">
         </div>
-        <div id="packModalHint" style="font-size:13px; color: var(--text-muted);">Ожидание ввода…</div>
+        <div id="packModalHint" class="modal-hint">Ожидание ввода…</div>
       </div>
       <div class="modal-actions" id="packModalActions"></div>
-      <div class="modal-footer">
-        <div id="packModalCancel" class="action-pill modal-cancel-pill" role="button" tabindex="0">
+      <div class="modal-actions modal-actions--footer">
+        <div id="packModalCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
           <span class="dot"></span>
           <span>ОТМЕНА</span>
         </div>
@@ -1316,8 +1526,8 @@
   <div class="modal" role="dialog" aria-modal="true">
     <div class="modal-content">
       <div>
-        <div class="modal-title">Загрузка сменного задания</div>
-        <div class="modal-sub">Вставьте список SKU построчно и нажмите «Загрузить».</div>
+        <div class="modal-title">Редактирование сменного задания</div>
+        <div class="modal-sub">Вставьте список SKU построчно и нажмите «Сохранить».</div>
       </div>
       <div class="modal-scan shift-plan-upload-box">
         <input id="shiftPlanNameInput" class="shift-plan-modal-input" type="text"
@@ -1327,8 +1537,8 @@
         <div id="shiftPlanUploadHint" class="shift-plan-modal-hint">Ожидание ввода…</div>
       </div>
       <div class="modal-actions" id="shiftPlanUploadActions"></div>
-      <div class="modal-footer">
-        <div id="shiftPlanUploadCancel" class="action-pill modal-cancel-pill" role="button" tabindex="0">
+      <div class="modal-actions modal-actions--footer">
+        <div id="shiftPlanUploadCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
           <span class="dot"></span>
           <span>ОТМЕНА</span>
         </div>
@@ -1346,8 +1556,33 @@
         <div class="modal-sub">Выберите один из ранее загруженных списков SKU.</div>
       </div>
       <div class="modal-actions" id="shiftPlanSelectActions"></div>
-      <div class="modal-footer">
-        <div id="shiftPlanSelectCancel" class="action-pill modal-cancel-pill" role="button" tabindex="0">
+      <div class="modal-actions modal-actions--footer">
+        <div id="shiftPlanSelectCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+          <span class="dot"></span>
+          <span>ОТМЕНА</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модалка входа мастера -->
+<div id="masterLoginBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div>
+        <div class="modal-title">Вход мастера</div>
+        <div class="modal-sub">Отсканируйте QR-код мастера формата M########.</div>
+      </div>
+      <div class="modal-scan">
+        <div class="modal-input-wrap">
+          QR: <input id="masterLoginInput" class="modal-input" type="text" placeholder="Например, M13540876">
+        </div>
+        <div id="masterLoginHint" class="modal-hint">Ожидание сканирования…</div>
+      </div>
+      <div class="modal-actions" id="masterLoginActions"></div>
+      <div class="modal-actions modal-actions--footer">
+        <div id="masterLoginCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
           <span class="dot"></span>
           <span>ОТМЕНА</span>
         </div>
@@ -1363,6 +1598,22 @@
   const SHIFT_PLAN_STORAGE_KEY = "kz_shift_plans";
   const SHIFT_PLAN_ACTIVE_KEY = "kz_shift_plan_active";
 
+  function warnAboutMergeMarkers() {
+    /**
+     * Проверяем HTML на остатки конфликтных маркеров.
+     *
+     * Что делаем:
+     * - ищем подстроки <<<<<<<, =======, >>>>>>> в тексте страницы.
+     * Почему это важно:
+     * - такие маркеры ломают верстку и вводят оператора в заблуждение;
+     * - мы лишь предупреждаем в консоли, чтобы не блокировать работу UI.
+     */
+    const text = document.body ? (document.body.innerText || "") : "";
+    if (text.includes("<<<<<<<") || text.includes("=======") || text.includes(">>>>>>>")) {
+      console.warn("Внимание: в DOM обнаружены конфликтные маркеры merge. Проверьте HTML.");
+    }
+  }
+
   let lastState = null;
   let timerStart = null;
   let workBase = 0;
@@ -1373,6 +1624,14 @@
   let shiftPlanList = [];
   let shiftPlanSelectedSku = null;
   let manualModeEnabled = false;
+  let shiftPlanCatalogFilter = "";
+
+  // Настройки прав оператора приходят из backend.
+  // Здесь держим их как единый объект, чтобы функции могли опираться на них.
+  const operatorSettings = {
+    operator_can_reorder: true,
+    operator_can_edit_qty: true,
+  };
 
   // Учебный каталог SKU: пока это локальный список,
   // который можно заменить на API без изменения UI-логики.
@@ -1496,6 +1755,21 @@
     } else {
       const nums = workers.map(w => w.replace(/^W/i, "")).join(", ");
       document.getElementById("workerName").textContent = `Команда: ${nums}`;
+    }
+
+    // Режим мастера: показываем ID и управляем кнопкой выхода.
+    // Это чисто UI-логика: только отображаем то, что пришло из backend.
+    const masterStatusEl = document.getElementById("masterStatus");
+    const btnMasterLogout = document.getElementById("btnMasterLogout");
+    const masterId = state.master_id || null;
+    if (masterStatusEl) {
+      masterStatusEl.textContent = masterId ? `Мастер: ${masterId}` : "Мастер: —";
+    }
+    if (btnMasterLogout) {
+      btnMasterLogout.classList.toggle("master-hidden", !masterId);
+    }
+    if (window.syncMasterState) {
+      window.syncMasterState(masterId);
     }
 
     // Кнопки смены (белая/зелёная)
@@ -1875,19 +2149,29 @@ document.getElementById("bedDetails").textContent =
      */
     const nameEl = document.getElementById("shiftPlanName");
     const countEl = document.getElementById("shiftPlanCount");
+    const renameInput = document.getElementById("shiftPlanRenameInput");
     if (!nameEl || !countEl) return;
 
     if (!shiftPlanSelected) {
       nameEl.textContent = "План не выбран";
       countEl.textContent = "Количество SKU: —";
+      if (renameInput) {
+        renameInput.value = "";
+        renameInput.placeholder = "Название плана для смены";
+      }
       renderShiftPlanList([]);
+      updateShiftPlanControlsAvailability();
       return;
     }
 
     const totalCount = shiftPlanSelected.items.reduce((sum, item) => sum + item.qty, 0);
     nameEl.textContent = `Выбран план: ${shiftPlanSelected.name}`;
     countEl.textContent = `Количество SKU: ${totalCount}`;
+    if (renameInput) {
+      renameInput.value = shiftPlanSelected.name;
+    }
     renderShiftPlanList(shiftPlanSelected.items);
+    updateShiftPlanControlsAvailability();
   }
 
   function renderShiftPlanList(items) {
@@ -1925,20 +2209,43 @@ document.getElementById("bedDetails").textContent =
       qtyEl.textContent = `×${item.qty}`;
 
       const minusBtn = document.createElement("div");
-      minusBtn.className = "shift-plan-mini-btn";
+      minusBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
       minusBtn.textContent = "−";
-      minusBtn.addEventListener("click", () => updateShiftPlanQty(item.sku, -1));
+      if (!operatorSettings.operator_can_edit_qty) {
+        minusBtn.classList.add("pill-btn--disabled");
+      }
+      minusBtn.addEventListener("click", () => {
+        if (!operatorSettings.operator_can_edit_qty) {
+          showPackToast("Изменение количества отключено настройками мастера.");
+          return;
+        }
+        updateShiftPlanQty(item.sku, -1);
+      });
 
       const plusBtn = document.createElement("div");
-      plusBtn.className = "shift-plan-mini-btn";
+      plusBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
       plusBtn.textContent = "+";
-      plusBtn.addEventListener("click", () => updateShiftPlanQty(item.sku, 1));
+      if (!operatorSettings.operator_can_edit_qty) {
+        plusBtn.classList.add("pill-btn--disabled");
+      }
+      plusBtn.addEventListener("click", () => {
+        if (!operatorSettings.operator_can_edit_qty) {
+          showPackToast("Изменение количества отключено настройками мастера.");
+          return;
+        }
+        updateShiftPlanQty(item.sku, 1);
+      });
+
+      const deleteBtn = document.createElement("div");
+      deleteBtn.className = "pill-btn pill-btn--danger pill-btn--mini";
+      deleteBtn.textContent = "Удалить";
+      deleteBtn.addEventListener("click", () => removeSkuFromShiftPlan(item.sku));
 
       const runBtn = document.createElement("div");
-      runBtn.className = "shift-plan-mini-btn";
-      runBtn.textContent = "Запустить (супервайзер)";
+      runBtn.className = "pill-btn pill-btn--primary pill-btn--mini";
+      runBtn.textContent = "Запустить";
       if (!manualModeEnabled) {
-        runBtn.classList.add("disabled");
+        runBtn.classList.add("pill-btn--disabled");
       } else {
         runBtn.addEventListener("click", () => startSkuFromPlan(item.sku));
       }
@@ -1947,8 +2254,95 @@ document.getElementById("bedDetails").textContent =
       row.appendChild(qtyEl);
       row.appendChild(minusBtn);
       row.appendChild(plusBtn);
+      row.appendChild(deleteBtn);
       row.appendChild(runBtn);
       listEl.appendChild(row);
+    });
+
+    updateShiftPlanControlsAvailability();
+  }
+
+  function applyOperatorSettings(settings) {
+    /**
+     * Применяем настройки прав оператора, полученные из backend.
+     *
+     * Почему делаем это отдельной функцией:
+     * - kiosk.js получает настройки и передаёт их сюда;
+     * - UI обновляется централизованно и без дублей логики.
+     */
+    if (typeof settings?.operator_can_reorder === "boolean") {
+      operatorSettings.operator_can_reorder = settings.operator_can_reorder;
+    }
+    if (typeof settings?.operator_can_edit_qty === "boolean") {
+      operatorSettings.operator_can_edit_qty = settings.operator_can_edit_qty;
+    }
+    if (shiftPlanSelected) {
+      renderShiftPlanList(shiftPlanSelected.items);
+    }
+    updateShiftPlanControlsAvailability();
+  }
+
+  function updateShiftPlanControlsAvailability() {
+    /**
+     * Управляем доступностью кнопок очереди.
+     *
+     * Принцип:
+     * - порядок (вверх/вниз) зависит от operator_can_reorder;
+     * - плюс/минус обновляются в renderShiftPlanList.
+     */
+    const hasSelection = !!shiftPlanSelectedSku;
+    const reorderAllowed = operatorSettings.operator_can_reorder && hasSelection;
+    if (btnShiftPlanMoveUp) {
+      setActionPillDisabled(btnShiftPlanMoveUp, !reorderAllowed);
+    }
+    if (btnShiftPlanMoveDown) {
+      setActionPillDisabled(btnShiftPlanMoveDown, !reorderAllowed);
+    }
+  }
+
+  // Делаем функцию доступной внешнему скрипту kiosk.js.
+  // Это безопасно, так как мы только обновляем UI.
+  window.applyOperatorSettings = applyOperatorSettings;
+
+  function renderShiftPlanCatalog() {
+    /**
+     * Показываем "живой" каталог SKU с фильтром.
+     *
+     * Что это даёт оператору:
+     * - быстрый выбор по клику;
+     * - визуальный список, а не скрытый выпадающий список;
+     * - поиск по подстроке для экономии времени.
+     */
+    const listEl = document.getElementById("shiftPlanCatalogList");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+
+    const filter = (shiftPlanCatalogFilter || "").toLowerCase();
+    const visibleItems = SHIFT_PLAN_SKU_CATALOG.filter((sku) => {
+      return !filter || sku.toLowerCase().includes(filter);
+    });
+
+    if (!visibleItems.length) {
+      const empty = document.createElement("div");
+      empty.className = "pack-meta";
+      empty.textContent = "Совпадений не найдено.";
+      listEl.appendChild(empty);
+      return;
+    }
+
+    visibleItems.forEach((sku) => {
+      const item = document.createElement("div");
+      item.className = "pill-btn pill-btn--ghost pill-btn--mini";
+      item.textContent = sku;
+      item.addEventListener("click", () => {
+        if (shiftPlanSkuInput) {
+          shiftPlanSkuInput.value = sku;
+          if (shiftPlanQtyInput) {
+            shiftPlanQtyInput.focus();
+          }
+        }
+      });
+      listEl.appendChild(item);
     });
   }
 
@@ -1970,6 +2364,47 @@ document.getElementById("bedDetails").textContent =
     saveShiftPlansToStorage();
     renderShiftPlanPanel();
     renderPackPlanPreview();
+  }
+
+  function removeSkuFromShiftPlan(sku) {
+    /**
+     * Полностью удаляем SKU из выбранного плана.
+     *
+     * Почему отдельно:
+     * - оператор ожидает явную кнопку "Удалить";
+     * - так проще объяснить, что строка исчезает полностью,
+     *   независимо от количества в колонке "×".
+     */
+    if (!shiftPlanSelected) return;
+    shiftPlanSelected.items = shiftPlanSelected.items.filter((item) => item.sku !== sku);
+    if (shiftPlanSelectedSku === sku) {
+      shiftPlanSelectedSku = null;
+    }
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
+  }
+
+  function renameShiftPlan() {
+    /**
+     * Переименовываем активный план.
+     *
+     * Зачем это нужно:
+     * - оператору важно видеть понятное имя ("Смена А", "Ночь");
+     * - так проще выбирать план из списка, особенно при частых сменах.
+     */
+    if (!shiftPlanSelected) {
+      showPackToast("Сначала выберите план, затем задайте ему имя.");
+      return;
+    }
+    const nextName = (shiftPlanRenameInput.value || "").trim();
+    if (!nextName) {
+      showPackToast("Введите название плана перед сохранением.");
+      return;
+    }
+    shiftPlanSelected.name = nextName;
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
   }
 
   function addSkuToShiftPlan() {
@@ -2024,6 +2459,37 @@ document.getElementById("bedDetails").textContent =
     renderPackPlanPreview();
   }
 
+  function moveSelectedSku(direction) {
+    /**
+     * Перемещаем выбранный SKU вверх или вниз в очереди.
+     *
+     * Почему это нужно:
+     * - оператор может оперативно поменять приоритеты;
+     * - движение строго на одну позицию, чтобы избежать ошибок.
+     */
+    if (!operatorSettings.operator_can_reorder) {
+      showPackToast("Изменение порядка отключено настройками мастера.");
+      return;
+    }
+    if (!shiftPlanSelected || !shiftPlanSelectedSku) {
+      showPackToast("Выберите строку в списке, чтобы изменить порядок.");
+      return;
+    }
+    const items = shiftPlanSelected.items;
+    const index = items.findIndex((item) => item.sku === shiftPlanSelectedSku);
+    if (index < 0) return;
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= items.length) {
+      showPackToast("Дальше перемещать нельзя.");
+      return;
+    }
+    const [moved] = items.splice(index, 1);
+    items.splice(newIndex, 0, moved);
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
+  }
+
   function initShiftPlanCatalog() {
     /**
      * Заполняем выпадающий список SKU локальным каталогом.
@@ -2037,6 +2503,7 @@ document.getElementById("bedDetails").textContent =
       option.value = sku;
       dataList.appendChild(option);
     });
+    renderShiftPlanCatalog();
   }
 
   async function startSkuFromPlan(sku) {
@@ -2045,8 +2512,11 @@ document.getElementById("bedDetails").textContent =
      * После успешного старта уменьшаем количество, чтобы список отражал прогресс.
      */
     if (!manualModeEnabled) return;
-    await handlePackAction("/api/kiosk/pack/start", { sku });
-    updateShiftPlanQty(sku, -1);
+    const ok = await handlePackAction("/api/kiosk/pack/start", { sku });
+    if (ok) {
+      updateShiftPlanQty(sku, -1);
+      showPackToast(`SKU ${sku} запущен. Очередь обновлена.`);
+    }
   }
 
   function renderShiftPlanSelectActions() {
@@ -2131,8 +2601,14 @@ document.getElementById("bedDetails").textContent =
   }
 
   async function handlePackAction(url, body) {
-    // Унифицированный вызов упаковочных действий.
-    // Если backend вернул 409/400, показываем понятный текст оператору.
+    /**
+     * Унифицированный вызов упаковочных действий.
+     *
+     * Почему возвращаем true/false:
+     * - это позволяет UI понять, было ли действие успешным;
+     * - в сценариях "Запустить SKU" можно корректно обновить очередь,
+     *   не удаляя строку при ошибке backend.
+     */
     try {
       const resp = await fetch(url, {
         method: "POST",
@@ -2142,11 +2618,13 @@ document.getElementById("bedDetails").textContent =
       if (!resp.ok) {
         const detail = await resp.json().catch(() => ({}));
         showPackToast(detail.detail || "Не удалось выполнить действие.");
-        return;
+        return false;
       }
       await refreshPackData();
+      return true;
     } catch (e) {
       showPackToast("Ошибка сети: действие не выполнено.");
+      return false;
     }
   }
 
@@ -2156,14 +2634,6 @@ document.getElementById("bedDetails").textContent =
     await fetchPackStepsState();
     loadShiftPlansFromStorage();
   }
-
-  setInterval(fetchState, 1500);
-  setInterval(refreshPackData, 2000);
-  setInterval(tickTimers, 1000);
-  fetchState();
-  refreshPackData();
-  initShiftPlanCatalog();
-  loadShiftPlansFromStorage();
 
   // ───────── Сканер, смены и рабочие центры ─────────
 
@@ -2242,12 +2712,12 @@ document.getElementById("bedDetails").textContent =
 
   function setActionPillActive(el, active) {
     if (!el) return;
-    el.classList.toggle("active", !!active);
+    el.classList.toggle("pill-btn--active", !!active);
   }
 
   function setActionPillDisabled(el, disabled) {
     if (!el) return;
-    el.classList.toggle("disabled", !!disabled);
+    el.classList.toggle("pill-btn--disabled", !!disabled);
     el.setAttribute("aria-disabled", disabled ? "true" : "false");
   }
 
@@ -2260,6 +2730,10 @@ document.getElementById("bedDetails").textContent =
       toast.style.display = "none";
     }, 4000);
   }
+
+  // Делаем уведомление доступным внешнему скрипту,
+  // чтобы kiosk.js мог показывать сообщения единым способом.
+  window.showPackToast = showPackToast;
 
   function openShiftModal(mode) {
     modalMode = mode || "add";
@@ -2344,7 +2818,7 @@ document.getElementById("bedDetails").textContent =
     shiftPlanUploadHint.textContent = "Ожидание ввода…";
     shiftPlanUploadActions.innerHTML = "";
 
-    const btnUpload = mkModalBtn("Загрузить", "success", async () => {
+    const btnUpload = mkModalBtn("Сохранить список", "success", async () => {
       const text = (shiftPlanTextarea.value || "").trim();
       if (!text) {
         shiftPlanUploadHint.textContent = "Список SKU пуст. Вставьте значения построчно.";
@@ -2393,12 +2867,13 @@ function mkModalBtn(text, kind, onClick) {
 
   const b = document.createElement("div");
 
-  // Базовый стиль — action-pill (как в верхней карточке)
-  b.className = "action-pill";
+  // Базовый стиль — pill-btn (как в верхней карточке)
+  b.className = "pill-btn";
 
-  // Добавим "тип" кнопки (зелёная/красная/синяя)
-  // kind приходит как "success" / "danger" / "primary"
-  if (kind) b.classList.add("modal-" + kind);
+  // Добавим "тип" кнопки (основная/опасная).
+  // kind приходит как "success" / "danger" / "primary".
+  if (kind === "danger") b.classList.add("pill-btn--danger");
+  if (kind === "primary" || kind === "success") b.classList.add("pill-btn--primary");
 
   // Внутри кнопки делаем точку + текст (как везде)
   b.innerHTML = `<span class="dot"></span><span>${text}</span>`;
@@ -2525,42 +3000,47 @@ function mkModalBtn(text, kind, onClick) {
   const btnShiftPlanSelect = document.getElementById("btnShiftPlanSelect");
   const btnShiftPlanAdd = document.getElementById("btnShiftPlanAdd");
   const btnShiftPlanRemoveSelected = document.getElementById("btnShiftPlanRemoveSelected");
+  const btnShiftPlanMoveUp = document.getElementById("btnShiftPlanMoveUp");
+  const btnShiftPlanMoveDown = document.getElementById("btnShiftPlanMoveDown");
   const shiftPlanSkuInput = document.getElementById("shiftPlanSkuInput");
   const shiftPlanQtyInput = document.getElementById("shiftPlanQtyInput");
+  const shiftPlanRenameInput = document.getElementById("shiftPlanRenameInput");
+  const btnShiftPlanRename = document.getElementById("btnShiftPlanRename");
+  const shiftPlanCatalogSearch = document.getElementById("shiftPlanCatalogSearch");
 
   if (btnPackStart) {
     btnPackStart.addEventListener("click", () => {
-      if (btnPackStart.classList.contains("disabled")) return;
+      if (btnPackStart.classList.contains("pill-btn--disabled")) return;
       openPackModal();
     });
   }
   if (btnPackStepComplete) {
     btnPackStepComplete.addEventListener("click", () => {
-      if (btnPackStepComplete.classList.contains("disabled")) return;
+      if (btnPackStepComplete.classList.contains("pill-btn--disabled")) return;
       handlePackAction("/api/kiosk/pack/step/complete");
     });
   }
   if (btnPackPhaseNext) {
     btnPackPhaseNext.addEventListener("click", () => {
-      if (btnPackPhaseNext.classList.contains("disabled")) return;
+      if (btnPackPhaseNext.classList.contains("pill-btn--disabled")) return;
       handlePackAction("/api/kiosk/pack/phase/next");
     });
   }
   if (btnPackCloseBox) {
     btnPackCloseBox.addEventListener("click", () => {
-      if (btnPackCloseBox.classList.contains("disabled")) return;
+      if (btnPackCloseBox.classList.contains("pill-btn--disabled")) return;
       handlePackAction("/api/kiosk/pack/close-box");
     });
   }
   if (btnPackPrintLabel) {
     btnPackPrintLabel.addEventListener("click", () => {
-      if (btnPackPrintLabel.classList.contains("disabled")) return;
+      if (btnPackPrintLabel.classList.contains("pill-btn--disabled")) return;
       handlePackAction("/api/kiosk/pack/print-label");
     });
   }
   if (btnPackTableEmpty) {
     btnPackTableEmpty.addEventListener("click", () => {
-      if (btnPackTableEmpty.classList.contains("disabled")) return;
+      if (btnPackTableEmpty.classList.contains("pill-btn--disabled")) return;
       handlePackAction("/api/kiosk/pack/table-empty");
     });
   }
@@ -2592,17 +3072,46 @@ function mkModalBtn(text, kind, onClick) {
   if (btnShiftPlanRemoveSelected) {
     btnShiftPlanRemoveSelected.addEventListener("click", () => removeSelectedSkuFromShiftPlan());
   }
+  if (btnShiftPlanMoveUp) {
+    btnShiftPlanMoveUp.addEventListener("click", () => moveSelectedSku(-1));
+  }
+  if (btnShiftPlanMoveDown) {
+    btnShiftPlanMoveDown.addEventListener("click", () => moveSelectedSku(1));
+  }
+  if (btnShiftPlanRename) {
+    btnShiftPlanRename.addEventListener("click", () => renameShiftPlan());
+  }
+  if (shiftPlanCatalogSearch) {
+    shiftPlanCatalogSearch.addEventListener("input", () => {
+      /**
+       * Фильтр каталога живой: оператор сразу видит суженный список.
+       * Это экономит время, особенно при длинных сменных заданиях.
+       */
+      shiftPlanCatalogFilter = shiftPlanCatalogSearch.value || "";
+      renderShiftPlanCatalog();
+    });
+  }
+
+  /**
+   * Инициализация UI.
+   *
+   * Почему именно здесь:
+   * - DOM уже готов (скрипт внизу страницы);
+   * - элементы уже найдены и можно безопасно их использовать;
+   * - сначала включаем защитные проверки, затем подгружаем данные.
+   */
+  warnAboutMergeMarkers();
+  setInterval(fetchState, 1500);
+  setInterval(refreshPackData, 2000);
+  setInterval(tickTimers, 1000);
+  fetchState();
+  refreshPackData();
+  initShiftPlanCatalog();
+  loadShiftPlansFromStorage();
 
   // helper для отладочной подписи внизу
   const scanDebug = document.createElement("div");
-  scanDebug.style.position = "fixed";
-  scanDebug.style.left = "8px";
-  scanDebug.style.bottom = "6px";
-  scanDebug.style.fontSize = "11px";
-  scanDebug.style.color = "#6b7280";
-  scanDebug.style.opacity = "0.8";
-  scanDebug.style.pointerEvents = "none";
-  scanDebug.style.zIndex = "9999";
+  scanDebug.className = "scan-debug";
   document.body.appendChild(scanDebug);
 
   async function startPackSession(workerId, sku) {
@@ -2742,5 +3251,7 @@ function mkModalBtn(text, kind, onClick) {
     }
   });
 </script>
+<!-- Дополнительный скрипт для режима мастера: отделяем логику, чтобы HTML был чище. -->
+<script src="/static/kiosk.js"></script>
 </body>
 </html>
