@@ -2149,6 +2149,11 @@ document.getElementById("bedDetails").textContent =
       deleteBtn.textContent = "Удалить";
       deleteBtn.addEventListener("click", () => removeSkuFromShiftPlan(item.sku));
 
+      const deleteBtn = document.createElement("div");
+      deleteBtn.className = "shift-plan-mini-btn danger";
+      deleteBtn.textContent = "Удалить";
+      deleteBtn.addEventListener("click", () => removeSkuFromShiftPlan(item.sku));
+
       const runBtn = document.createElement("div");
       runBtn.className = "shift-plan-mini-btn";
       runBtn.textContent = "Запустить";
@@ -2211,6 +2216,48 @@ document.getElementById("bedDetails").textContent =
   // Делаем функцию доступной внешнему скрипту kiosk.js.
   // Это безопасно, так как мы только обновляем UI.
   window.applyOperatorSettings = applyOperatorSettings;
+
+  function renderShiftPlanCatalog() {
+    /**
+     * Показываем "живой" каталог SKU с фильтром.
+     *
+     * Что это даёт оператору:
+     * - быстрый выбор по клику;
+     * - визуальный список, а не скрытый выпадающий список;
+     * - поиск по подстроке для экономии времени.
+     */
+    const listEl = document.getElementById("shiftPlanCatalogList");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+
+    const filter = (shiftPlanCatalogFilter || "").toLowerCase();
+    const visibleItems = SHIFT_PLAN_SKU_CATALOG.filter((sku) => {
+      return !filter || sku.toLowerCase().includes(filter);
+    });
+
+    if (!visibleItems.length) {
+      const empty = document.createElement("div");
+      empty.className = "pack-meta";
+      empty.textContent = "Совпадений не найдено.";
+      listEl.appendChild(empty);
+      return;
+    }
+
+    visibleItems.forEach((sku) => {
+      const item = document.createElement("div");
+      item.className = "shift-plan-catalog-item";
+      item.textContent = sku;
+      item.addEventListener("click", () => {
+        if (shiftPlanSkuInput) {
+          shiftPlanSkuInput.value = sku;
+          if (shiftPlanQtyInput) {
+            shiftPlanQtyInput.focus();
+          }
+        }
+      });
+      listEl.appendChild(item);
+    });
+  }
 
   function renderShiftPlanCatalog() {
     /**
