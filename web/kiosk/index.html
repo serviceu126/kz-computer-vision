@@ -652,8 +652,8 @@
        поэтому ограничиваем рост по высоте и не даём блоку "расползаться". */
     .steps-card {
       flex: 0 0 auto;
-      min-height: 140px;
-      max-height: 220px;
+      min-height: 110px;
+      max-height: 160px;
     }
 
     /* Контейнер правой колонки:
@@ -700,6 +700,97 @@
       border-color: rgba(56, 189, 248, 0.8);
       background: rgba(8, 47, 73, 0.55);
       color: #e0f2fe;
+    }
+
+    /* Блок сменного задания: компактные элементы ввода и список SKU. */
+    .shift-plan-controls {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
+    }
+
+    .shift-plan-input {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid var(--border-soft);
+      background: rgba(2, 6, 23, 0.55);
+      color: var(--text-main);
+      padding: 6px 8px;
+      font-size: 13px;
+    }
+
+    .shift-plan-qty {
+      max-width: 90px;
+    }
+
+    .shift-plan-list {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 160px;
+      overflow: hidden;
+    }
+
+    .shift-plan-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto auto;
+      gap: 6px;
+      align-items: center;
+      padding: 6px 8px;
+      border-radius: 10px;
+      border: 1px solid var(--border-soft);
+      background: rgba(2, 6, 23, 0.55);
+      font-size: 13px;
+    }
+
+    .shift-plan-row.selected {
+      border-color: rgba(56, 189, 248, 0.7);
+      background: rgba(8, 47, 73, 0.55);
+      color: #e0f2fe;
+    }
+
+    .shift-plan-mini-btn {
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.55);
+      background: rgba(15, 23, 42, 0.55);
+      color: var(--text-main);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .shift-plan-mini-btn.disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .shift-plan-modal-input {
+      background: transparent;
+      border: none;
+      color: #e0f2fe;
+      font-size: 15px;
+    }
+
+    .shift-plan-modal-textarea {
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: #e0f2fe;
+      font-size: 14px;
+      resize: vertical;
+    }
+
+    .shift-plan-modal-hint {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .shift-plan-upload-box {
+      flex-direction: column;
+      align-items: stretch;
     }
 
     .pack-toast {
@@ -1089,7 +1180,20 @@
         <div class="card-title">Сменное задание</div>
         <div class="pack-meta" id="shiftPlanName">План не выбран</div>
         <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
+        <div class="shift-plan-controls">
+          <input id="shiftPlanSkuInput" class="shift-plan-input" list="shiftPlanSkuCatalog"
+                 placeholder="SKU из каталога" />
+          <input id="shiftPlanQtyInput" class="shift-plan-input shift-plan-qty" type="number" min="1" value="1" />
+          <div id="btnShiftPlanAdd" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Добавить</span>
+          </div>
+        </div>
         <div class="action-row" style="justify-content:flex-start;">
+          <div id="btnShiftPlanRemoveSelected" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Удалить выбранное</span>
+          </div>
           <div id="btnShiftPlanUpload" class="action-pill" role="button" tabindex="0">
             <span class="dot"></span>
             <span>Загрузить список</span>
@@ -1099,9 +1203,12 @@
             <span>Выбрать из списка</span>
           </div>
         </div>
+        <div class="pack-meta">Текущий список на смену</div>
+        <div class="shift-plan-list" id="shiftPlanList"></div>
+        <datalist id="shiftPlanSkuCatalog"></datalist>
       </div>
 
-      <div class="card steps-card" style="min-height:0;">
+      <div class="card steps-card">
         <div>
           <div class="card-title">Прогресс комплекта</div>
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -1212,12 +1319,12 @@
         <div class="modal-title">Загрузка сменного задания</div>
         <div class="modal-sub">Вставьте список SKU построчно и нажмите «Загрузить».</div>
       </div>
-      <div class="modal-scan" style="flex-direction:column; align-items:stretch;">
-        <input id="shiftPlanNameInput" type="text" placeholder="Название плана (например, Смена А)"
-               style="background:transparent; border:none; color:#e0f2fe; font-size:15px;">
-        <textarea id="shiftPlanTextarea" rows="6" placeholder="SKU по одному на строке"
-                  style="width:100%; background:transparent; border:none; color:#e0f2fe; font-size:14px; resize:vertical;"></textarea>
-        <div id="shiftPlanUploadHint" style="font-size:13px; color: var(--text-muted);">Ожидание ввода…</div>
+      <div class="modal-scan shift-plan-upload-box">
+        <input id="shiftPlanNameInput" class="shift-plan-modal-input" type="text"
+               placeholder="Название плана (например, Смена А)">
+        <textarea id="shiftPlanTextarea" class="shift-plan-modal-textarea" rows="6"
+                  placeholder="SKU по одному на строке"></textarea>
+        <div id="shiftPlanUploadHint" class="shift-plan-modal-hint">Ожидание ввода…</div>
       </div>
       <div class="modal-actions" id="shiftPlanUploadActions"></div>
       <div class="modal-footer">
@@ -1253,9 +1360,8 @@
   const API_STATE_URL = "/api/kiosk/state";
   const API_PACK_UI_STATE_URL = "/api/kiosk/pack/ui-state";
   const API_PACK_STEPS_STATE_URL = "/api/kiosk/pack/steps/state";
-  const API_SHIFT_PLAN_UPLOAD_URL = "/api/kiosk/pack/plan/upload";
-  const API_SHIFT_PLAN_LIST_URL = "/api/kiosk/pack/plan/list";
-  const API_SHIFT_PLAN_SELECT_URL = "/api/kiosk/pack/plan/select";
+  const SHIFT_PLAN_STORAGE_KEY = "kz_shift_plans";
+  const SHIFT_PLAN_ACTIVE_KEY = "kz_shift_plan_active";
 
   let lastState = null;
   let timerStart = null;
@@ -1265,6 +1371,17 @@
   let packStepsState = null;
   let shiftPlanSelected = null;
   let shiftPlanList = [];
+  let shiftPlanSelectedSku = null;
+  let manualModeEnabled = false;
+
+  // Учебный каталог SKU: пока это локальный список,
+  // который можно заменить на API без изменения UI-логики.
+  const SHIFT_PLAN_SKU_CATALOG = [
+    "SKU-1",
+    "SKU-2",
+    "SKU-3",
+    "SKU-DEFAULT",
+  ];
   let btnPackStart = null;
   let btnPackStepComplete = null;
   let btnPackPhaseNext = null;
@@ -1604,24 +1721,47 @@ document.getElementById("bedDetails").textContent =
     }
   }
 
-  async function fetchShiftPlanList() {
+  function loadShiftPlansFromStorage() {
+    /**
+     * Загружаем планы и активный план из localStorage.
+     *
+     * Зачем:
+     * - оператор не должен терять список после перезагрузки страницы;
+     * - backend пока не участвует в хранении плана;
+     * - логика остаётся на стороне UI и легко переносится на API позже.
+     */
     try {
-      const resp = await fetch(API_SHIFT_PLAN_LIST_URL, { cache: "no-store" });
-      if (!resp.ok) {
-        shiftPlanList = [];
-        shiftPlanSelected = null;
-        renderShiftPlanPanel();
-        renderPackPlanPreview();
-        return;
-      }
-      const data = await resp.json();
-      shiftPlanList = data.plans || [];
-      shiftPlanSelected = data.selected_plan || null;
-      renderShiftPlanPanel();
-      renderPackPlanPreview();
+      const plansRaw = localStorage.getItem(SHIFT_PLAN_STORAGE_KEY) || "[]";
+      const activeRaw = localStorage.getItem(SHIFT_PLAN_ACTIVE_KEY) || "0";
+      const rawPlans = JSON.parse(plansRaw) || [];
+      shiftPlanList = rawPlans.map((plan) => {
+        const items = (plan.items || []).map((item) => {
+          if (typeof item === "string") {
+            return { sku: item, qty: 1 };
+          }
+          return { sku: item.sku, qty: item.qty || 1 };
+        });
+        return { id: plan.id, name: plan.name || "Сменное задание", items };
+      });
+      const activeId = parseInt(activeRaw, 10);
+      shiftPlanSelected = shiftPlanList.find((p) => p.id === activeId) || null;
     } catch (e) {
-      console.warn("Ошибка получения списка сменных заданий:", e);
+      shiftPlanList = [];
+      shiftPlanSelected = null;
     }
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
+  }
+
+  function saveShiftPlansToStorage() {
+    /**
+     * Сохраняем планы и выбранный план локально.
+     *
+     * Это базовая гарантия, что UI не "забывает" список между перезапусками,
+     * даже если сеть или backend недоступны.
+     */
+    localStorage.setItem(SHIFT_PLAN_STORAGE_KEY, JSON.stringify(shiftPlanList || []));
+    localStorage.setItem(SHIFT_PLAN_ACTIVE_KEY, String(shiftPlanSelected ? shiftPlanSelected.id : 0));
   }
 
   function renderPackUiState() {
@@ -1723,7 +1863,7 @@ document.getElementById("bedDetails").textContent =
       const row = document.createElement("div");
       row.className = "pack-step-line";
       if (idx === 0) row.classList.add("current");
-      row.innerHTML = `<span>${item}</span><span>SKU</span>`;
+      row.innerHTML = `<span>${item.sku}</span><span>×${item.qty}</span>`;
       list.appendChild(row);
     });
   }
@@ -1740,11 +1880,173 @@ document.getElementById("bedDetails").textContent =
     if (!shiftPlanSelected) {
       nameEl.textContent = "План не выбран";
       countEl.textContent = "Количество SKU: —";
+      renderShiftPlanList([]);
       return;
     }
 
+    const totalCount = shiftPlanSelected.items.reduce((sum, item) => sum + item.qty, 0);
     nameEl.textContent = `Выбран план: ${shiftPlanSelected.name}`;
-    countEl.textContent = `Количество SKU: ${shiftPlanSelected.count}`;
+    countEl.textContent = `Количество SKU: ${totalCount}`;
+    renderShiftPlanList(shiftPlanSelected.items);
+  }
+
+  function renderShiftPlanList(items) {
+    /**
+     * Рисуем текущий список SKU на смену.
+     * Здесь оператор видит количество и может корректировать его в ручном режиме.
+     */
+    const listEl = document.getElementById("shiftPlanList");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+
+    if (!items || !items.length) {
+      const empty = document.createElement("div");
+      empty.className = "pack-meta";
+      empty.textContent = "Список пуст. Можно работать по сканированию.";
+      listEl.appendChild(empty);
+      return;
+    }
+
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "shift-plan-row";
+      if (shiftPlanSelectedSku === item.sku) {
+        row.classList.add("selected");
+      }
+
+      const skuEl = document.createElement("div");
+      skuEl.textContent = item.sku;
+      skuEl.addEventListener("click", () => {
+        shiftPlanSelectedSku = item.sku;
+        renderShiftPlanList(items);
+      });
+
+      const qtyEl = document.createElement("div");
+      qtyEl.textContent = `×${item.qty}`;
+
+      const minusBtn = document.createElement("div");
+      minusBtn.className = "shift-plan-mini-btn";
+      minusBtn.textContent = "−";
+      minusBtn.addEventListener("click", () => updateShiftPlanQty(item.sku, -1));
+
+      const plusBtn = document.createElement("div");
+      plusBtn.className = "shift-plan-mini-btn";
+      plusBtn.textContent = "+";
+      plusBtn.addEventListener("click", () => updateShiftPlanQty(item.sku, 1));
+
+      const runBtn = document.createElement("div");
+      runBtn.className = "shift-plan-mini-btn";
+      runBtn.textContent = "Запустить (супервайзер)";
+      if (!manualModeEnabled) {
+        runBtn.classList.add("disabled");
+      } else {
+        runBtn.addEventListener("click", () => startSkuFromPlan(item.sku));
+      }
+
+      row.appendChild(skuEl);
+      row.appendChild(qtyEl);
+      row.appendChild(minusBtn);
+      row.appendChild(plusBtn);
+      row.appendChild(runBtn);
+      listEl.appendChild(row);
+    });
+  }
+
+  function updateShiftPlanQty(sku, delta) {
+    /**
+     * Меняем количество SKU в списке.
+     * Если количество становится нулевым — удаляем позицию, чтобы список был чистым.
+     */
+    if (!shiftPlanSelected) return;
+    const item = shiftPlanSelected.items.find((it) => it.sku === sku);
+    if (!item) return;
+    item.qty = Math.max(0, item.qty + delta);
+    if (item.qty === 0) {
+      shiftPlanSelected.items = shiftPlanSelected.items.filter((it) => it.sku !== sku);
+      if (shiftPlanSelectedSku === sku) {
+        shiftPlanSelectedSku = null;
+      }
+    }
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
+  }
+
+  function addSkuToShiftPlan() {
+    /**
+     * Добавляем SKU в активный план.
+     * Если план ещё не выбран — создаём новый, чтобы оператор мог работать сразу.
+     */
+    const sku = (shiftPlanSkuInput.value || "").trim();
+    const qty = Math.max(1, parseInt(shiftPlanQtyInput.value || "1", 10));
+    if (!sku) {
+      showPackToast("Выберите SKU из списка или введите вручную.");
+      return;
+    }
+
+    if (!shiftPlanSelected) {
+      const newPlan = {
+        id: Date.now(),
+        name: "Сменное задание",
+        items: [],
+      };
+      shiftPlanList.unshift(newPlan);
+      shiftPlanSelected = newPlan;
+    }
+
+    const existing = shiftPlanSelected.items.find((item) => item.sku === sku);
+    if (existing) {
+      existing.qty += qty;
+    } else {
+      shiftPlanSelected.items.push({ sku, qty });
+    }
+
+    shiftPlanSkuInput.value = "";
+    shiftPlanQtyInput.value = "1";
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
+  }
+
+  function removeSelectedSkuFromShiftPlan() {
+    /**
+     * Удаляем выбранную позицию из плана.
+     * Это нужно, чтобы оператор мог быстро корректировать список без модалки.
+     */
+    if (!shiftPlanSelected || !shiftPlanSelectedSku) {
+      showPackToast("Выберите строку в списке, чтобы удалить.");
+      return;
+    }
+    shiftPlanSelected.items = shiftPlanSelected.items.filter((item) => item.sku !== shiftPlanSelectedSku);
+    shiftPlanSelectedSku = null;
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
+  }
+
+  function initShiftPlanCatalog() {
+    /**
+     * Заполняем выпадающий список SKU локальным каталогом.
+     * Это временная мера: позже каталог можно заменить на API без смены UI.
+     */
+    const dataList = document.getElementById("shiftPlanSkuCatalog");
+    if (!dataList) return;
+    dataList.innerHTML = "";
+    SHIFT_PLAN_SKU_CATALOG.forEach((sku) => {
+      const option = document.createElement("option");
+      option.value = sku;
+      dataList.appendChild(option);
+    });
+  }
+
+  async function startSkuFromPlan(sku) {
+    /**
+     * Запуск SKU из списка — только в ручном режиме супервайзера.
+     * После успешного старта уменьшаем количество, чтобы список отражал прогресс.
+     */
+    if (!manualModeEnabled) return;
+    await handlePackAction("/api/kiosk/pack/start", { sku });
+    updateShiftPlanQty(sku, -1);
   }
 
   function renderShiftPlanSelectActions() {
@@ -1760,60 +2062,72 @@ document.getElementById("bedDetails").textContent =
     }
 
     shiftPlanList.forEach((plan) => {
+      const totalCount = plan.items.reduce((sum, item) => sum + item.qty, 0);
       shiftPlanSelectActions.appendChild(
-        mkModalBtn(`${plan.name} (${plan.count} SKU)`, "success", async () => {
-          await selectShiftPlan(plan.id);
+        mkModalBtn(`${plan.name} (${totalCount} SKU)`, "success", async () => {
+          selectShiftPlan(plan.id);
           closeShiftPlanSelectModal();
         })
       );
     });
   }
 
-  async function uploadShiftPlan(text, name) {
+  function parseShiftPlanText(text) {
     /**
-     * Загружает сменное задание в backend.
-     * Мы отправляем текст построчно, чтобы оператору было проще подготовить список.
+     * Преобразуем текстовый список SKU в массив позиций с количеством.
+     * Если SKU повторяется, суммируем количество, чтобы оператор видел итог.
      */
-    try {
-      const resp = await fetch(API_SHIFT_PLAN_UPLOAD_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, name: name || null }),
-      });
-      if (!resp.ok) {
-        const detail = await resp.json().catch(() => ({}));
-        showPackToast(detail.detail || "Не удалось загрузить план.");
-        return;
-      }
-      await fetchShiftPlanList();
-    } catch (e) {
-      showPackToast("Ошибка сети: план не загружен.");
-    }
+    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+    const map = new Map();
+    lines.forEach((sku) => {
+      const count = map.get(sku) || 0;
+      map.set(sku, count + 1);
+    });
+    return Array.from(map.entries()).map(([sku, qty]) => ({ sku, qty }));
   }
 
-  async function selectShiftPlan(planId) {
+  function uploadShiftPlan(text, name) {
+    /**
+     * Загружает сменное задание в backend.
+     * Здесь сохраняем план локально, чтобы он не терялся при обновлении страницы.
+     */
+    const items = parseShiftPlanText(text);
+    if (!items.length) {
+      showPackToast("Список SKU пуст. План не сохранён.");
+      return;
+    }
+
+    const planName = (name || "Сменное задание").trim();
+    if (shiftPlanSelected) {
+      shiftPlanSelected.name = planName;
+      shiftPlanSelected.items = items;
+      shiftPlanSelectedSku = null;
+    } else {
+      const newPlan = {
+        id: Date.now(),
+        name: planName,
+        items,
+      };
+      shiftPlanList.unshift(newPlan);
+      shiftPlanSelected = newPlan;
+      shiftPlanSelectedSku = null;
+    }
+
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
+  }
+
+  function selectShiftPlan(planId) {
     /**
      * Выбор плана влияет только на подсказки в UI.
      * Упаковочный процесс продолжает управляться QR и FSM.
      */
-    try {
-      const resp = await fetch(API_SHIFT_PLAN_SELECT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan_id: planId }),
-      });
-      if (!resp.ok) {
-        const detail = await resp.json().catch(() => ({}));
-        showPackToast(detail.detail || "Не удалось выбрать план.");
-        return;
-      }
-      const data = await resp.json();
-      shiftPlanSelected = data.selected_plan || null;
-      renderShiftPlanPanel();
-      renderPackPlanPreview();
-    } catch (e) {
-      showPackToast("Ошибка сети: план не выбран.");
-    }
+    shiftPlanSelected = shiftPlanList.find((plan) => plan.id === planId) || null;
+    shiftPlanSelectedSku = null;
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
   }
 
   async function handlePackAction(url, body) {
@@ -1840,7 +2154,7 @@ document.getElementById("bedDetails").textContent =
     // После каждого действия пересчитываем UI: состояния, шаги и план.
     await fetchPackUiState();
     await fetchPackStepsState();
-    await fetchShiftPlanList();
+    loadShiftPlansFromStorage();
   }
 
   setInterval(fetchState, 1500);
@@ -1848,6 +2162,8 @@ document.getElementById("bedDetails").textContent =
   setInterval(tickTimers, 1000);
   fetchState();
   refreshPackData();
+  initShiftPlanCatalog();
+  loadShiftPlansFromStorage();
 
   // ───────── Сканер, смены и рабочие центры ─────────
 
@@ -2016,8 +2332,15 @@ document.getElementById("bedDetails").textContent =
     shiftPlanUploadOpen = true;
     shiftPlanUploadBackdrop.classList.add("open");
     shiftPlanUploadBackdrop.setAttribute("aria-hidden", "false");
-    shiftPlanNameInput.value = "";
-    shiftPlanTextarea.value = "";
+    if (shiftPlanSelected) {
+      shiftPlanNameInput.value = shiftPlanSelected.name;
+      shiftPlanTextarea.value = shiftPlanSelected.items
+        .flatMap((item) => Array(item.qty).fill(item.sku))
+        .join("\n");
+    } else {
+      shiftPlanNameInput.value = "";
+      shiftPlanTextarea.value = "";
+    }
     shiftPlanUploadHint.textContent = "Ожидание ввода…";
     shiftPlanUploadActions.innerHTML = "";
 
@@ -2028,7 +2351,7 @@ document.getElementById("bedDetails").textContent =
         return;
       }
       const name = (shiftPlanNameInput.value || "").trim();
-      await uploadShiftPlan(text, name);
+      uploadShiftPlan(text, name);
       closeShiftPlanUploadModal();
     });
     shiftPlanUploadActions.appendChild(btnUpload);
@@ -2200,6 +2523,10 @@ function mkModalBtn(text, kind, onClick) {
   const manualControls = document.getElementById("manualControls");
   const btnShiftPlanUpload = document.getElementById("btnShiftPlanUpload");
   const btnShiftPlanSelect = document.getElementById("btnShiftPlanSelect");
+  const btnShiftPlanAdd = document.getElementById("btnShiftPlanAdd");
+  const btnShiftPlanRemoveSelected = document.getElementById("btnShiftPlanRemoveSelected");
+  const shiftPlanSkuInput = document.getElementById("shiftPlanSkuInput");
+  const shiftPlanQtyInput = document.getElementById("shiftPlanQtyInput");
 
   if (btnPackStart) {
     btnPackStart.addEventListener("click", () => {
@@ -2246,6 +2573,10 @@ function mkModalBtn(text, kind, onClick) {
        * Супервайзер осознанно раскрывает этот блок при необходимости.
        */
       manualControls.classList.toggle("open");
+      manualModeEnabled = manualControls.classList.contains("open");
+      if (shiftPlanSelected) {
+        renderShiftPlanList(shiftPlanSelected.items);
+      }
     });
   }
 
@@ -2254,6 +2585,12 @@ function mkModalBtn(text, kind, onClick) {
   }
   if (btnShiftPlanSelect) {
     btnShiftPlanSelect.addEventListener("click", () => openShiftPlanSelectModal());
+  }
+  if (btnShiftPlanAdd) {
+    btnShiftPlanAdd.addEventListener("click", () => addSkuToShiftPlan());
+  }
+  if (btnShiftPlanRemoveSelected) {
+    btnShiftPlanRemoveSelected.addEventListener("click", () => removeSelectedSkuFromShiftPlan());
   }
 
   // helper для отладочной подписи внизу
