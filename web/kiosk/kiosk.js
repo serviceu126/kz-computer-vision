@@ -312,6 +312,37 @@
     }
   });
 
+  function initMainTabs() {
+    /**
+     * Переключение верхних вкладок.
+     *
+     * Мы не меняем данные и бизнес-логику, только показываем нужный экран.
+     * Это безопасно: все API и таймеры продолжают работать в фоне.
+     */
+    const tabbar = document.getElementById("mainTabbar");
+    if (!tabbar) return;
+    const tabs = Array.from(tabbar.querySelectorAll(".tab"));
+    const screens = Array.from(document.querySelectorAll(".screen"));
+
+    const activateScreen = (screenId) => {
+      screens.forEach((screen) => {
+        const isActive = screen.id === screenId;
+        screen.dataset.active = isActive ? "true" : "false";
+      });
+      tabs.forEach((tab) => {
+        tab.classList.toggle("tab--active", tab.dataset.screen === screenId);
+      });
+    };
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.screen;
+        if (!target) return;
+        activateScreen(target);
+      });
+    });
+  }
+
   if (settingCanReorder) {
     settingCanReorder.addEventListener("change", () => saveSettings());
   }
@@ -342,4 +373,5 @@
   // Стартовая синхронизация настроек.
   updateSettingsAvailability();
   fetchSettings();
+  initMainTabs();
 })();

@@ -914,38 +914,6 @@
       color: var(--info-text);
     }
 
-    .shift-plan-catalog {
-      margin-top: 8px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .shift-plan-catalog-list {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-      gap: 6px;
-      max-height: 110px;
-      overflow: auto;
-    }
-
-    .shift-plan-catalog-item {
-      padding: 6px 8px;
-      border-radius: 10px;
-      border: 1px solid var(--border-soft);
-      background: rgba(2, 6, 23, 0.55);
-      color: var(--text-main);
-      font-size: 12px;
-      text-align: center;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .shift-plan-catalog-item:hover {
-      border-color: rgba(56, 189, 248, 0.7);
-      color: #e0f2fe;
-    }
-
     .shift-plan-list {
       margin-top: var(--space-sm);
       display: flex;
@@ -955,7 +923,7 @@
       overflow: auto;
     }
 
-    .shift-plan-row {
+    .shift-plan-catalog-list {
       display: grid;
       grid-template-columns: 1fr auto auto auto auto auto;
       gap: var(--space-xs);
@@ -1143,8 +1111,233 @@
     <!--<img src="/static/logo.png" class="logo-img" alt="Новые мебельные технологии" /> -->
   </div>
 
-  <!-- Верх -->
-  <div class="top-bar">
+  <!-- Основные вкладки: переключают целые экраны, не трогая логику данных. -->
+  <div class="tabbar" id="mainTabbar">
+    <div class="pill-btn tab tab--active" role="button" tabindex="0" data-screen="screenOperator">
+      <span class="dot"></span>
+      <span>Оператор</span>
+    </div>
+    <div class="pill-btn tab" role="button" tabindex="0" data-screen="screenQueue">
+      <span class="dot"></span>
+      <span>Очередь</span>
+    </div>
+    <div class="pill-btn tab" role="button" tabindex="0" data-screen="screenManagement">
+      <span class="dot"></span>
+      <span>Управление</span>
+    </div>
+    <div class="pill-btn tab" role="button" tabindex="0" data-screen="screenStats">
+      <span class="dot"></span>
+      <span>Статистика</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Экран оператора: показываем только рабочие подсказки и состояние. -->
+    <div class="screen" id="screenOperator" data-active="true">
+      <div class="container">
+        <!-- Центр -->
+        <div class="middle">
+          <div class="panel panel--camera">
+            <div class="panel-header">
+              <div class="panel-title">Рабочий стол (вид сверху)</div>
+            </div>
+            <div class="panel-body">
+              <div class="camera-frame">
+                <img id="cameraImage" class="camera-image" src="" alt="Поток с камеры" />
+                <div id="cameraOverlay" class="camera-overlay"></div>
+              </div>
+              <div class="camera-caption">
+                <span id="cameraHint">
+                  Зона контроля: ~3.5–4.0×1.5 м. Следуйте подсветке деталей на столе.
+                </span>
+                <span id="workerStateLabel">Состояние: —</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="right-column">
+            <div class="panel panel--instruction">
+              <div class="panel-header">
+                <div class="panel-title">Текущая команда</div>
+              </div>
+              <div class="panel-body">
+                <div class="instruction-main">
+                  <span class="big-icon">🛠️</span>
+                  <span id="instructionMain">Ожидание начала упаковки…</span>
+                </div>
+                <div class="instruction-sub" id="instructionSub">
+                  Выберите кровать и просканируйте QR-код для старта.
+                </div>
+                <div class="instruction-extra" id="instructionExtra">
+                  Голосовые подсказки дублируют текст. Работайте по голосу, на экран поглядывайте только при необходимости.
+                </div>
+              </div>
+            </div>
+
+            <div class="panel panel--pack">
+              <div class="panel-header">
+                <div class="panel-title">Упаковка</div>
+              </div>
+              <div class="panel-body">
+                <div class="pack-row">
+                  <div class="pack-main" id="packStateLabel">Состояние: —</div>
+                  <div class="pack-state-chip">
+                    <span class="dot"></span>
+                    <span id="packPhaseLabel">Фаза: —</span>
+                  </div>
+                </div>
+                <div class="pack-hint" id="packHint">Сканируйте QR-код кровати (SKU) для старта.</div>
+
+                <div class="pack-current-step">
+                  <div class="pack-current-step-title">Текущий шаг</div>
+                  <div class="pack-current-step-value" id="packCurrentStep">—</div>
+                </div>
+
+                <div class="pack-available" id="packFlags">
+                  <div>Доступно:</div>
+                  <div>• —</div>
+                </div>
+
+                <div class="pack-manual-note">
+                  <strong>Ручной режим:</strong> кнопки ниже предназначены только для супервайзера.
+                </div>
+
+                <div class="pill-row pill-row--start">
+                  <div id="btnManualToggle" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Ручной режим (супервайзер)</span>
+                  </div>
+                </div>
+
+                <div class="pill-row manual-controls" id="manualControls">
+                  <div id="btnPackStart" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Старт SKU (ручной режим)</span>
+                  </div>
+                  <div id="btnPackStepComplete" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Шаг выполнен (ручной режим)</span>
+                  </div>
+                  <div id="btnPackPhaseNext" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Следующая фаза (ручной режим)</span>
+                  </div>
+                  <div id="btnPackCloseBox" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Закрыть коробку (ручной режим)</span>
+                  </div>
+                  <div id="btnPackPrintLabel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Печать этикетки (ручной режим)</span>
+                  </div>
+                  <div id="btnPackTableEmpty" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Стол пустой (ручной режим)</span>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="panel-title panel-title--compact">Ближайшие шаги</div>
+                  <div class="pack-steps-preview" id="packPlanPreview">
+                    <div class="pack-step-line">
+                      <span>План выкладки будет загружен автоматически</span>
+                      <span>—</span>
+                    </div>
+                  </div>
+                  <div class="pack-toast" id="packToast"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel panel--steps">
+              <div class="panel-header">
+                <div class="panel-title">Прогресс комплекта</div>
+              </div>
+              <div class="panel-body">
+                <div class="steps-summary-row">
+                  <div id="stepsSummary">Шаг 0 из 0</div>
+                  <div class="text-muted-sm" id="stepsCounters">
+                    0 проверено, 0 ошибок
+                  </div>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="steps-list" id="stepsList"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Экран очереди: работа со сменным заданием и SKU. -->
+    <div class="screen" id="screenQueue" data-active="false">
+      <div class="container">
+        <div class="panel panel--shift-plan" id="shiftPlanCard">
+          <div class="panel-header">
+            <div class="panel-title">Сменное задание</div>
+          </div>
+          <div class="panel-body">
+            <div class="pack-meta" id="shiftPlanName">План не выбран</div>
+            <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
+            <div class="shift-plan-rename">
+              <input id="shiftPlanRenameInput" class="shift-plan-input" placeholder="Название плана для смены" />
+              <div id="btnShiftPlanRename" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Переименовать</span>
+              </div>
+            </div>
+            <div class="shift-plan-controls">
+              <input id="shiftPlanSkuInput" class="shift-plan-input" list="shiftPlanSkuCatalog"
+                     placeholder="SKU из каталога или вручную" />
+              <input id="shiftPlanQtyInput" class="shift-plan-input shift-plan-qty" type="number" min="1"
+                     value="1" placeholder="Количество" />
+              <div id="btnShiftPlanAdd" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Добавить</span>
+              </div>
+            </div>
+            <div class="shift-plan-catalog">
+              <input id="shiftPlanCatalogSearch" class="shift-plan-input"
+                     placeholder="Поиск в каталоге SKU" />
+              <div class="shift-plan-catalog-list" id="shiftPlanCatalogList"></div>
+            </div>
+            <div class="pill-row pill-row--start">
+              <div id="btnShiftPlanRemoveSelected" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Удалить выбранное</span>
+              </div>
+              <div id="btnShiftPlanMoveUp" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Вверх</span>
+              </div>
+              <div id="btnShiftPlanMoveDown" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Вниз</span>
+              </div>
+              <div id="btnShiftPlanUpload" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Редактировать список</span>
+              </div>
+              <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Выбрать из списка</span>
+              </div>
+            </div>
+            <div class="pack-meta">Текущий список на смену</div>
+            <div class="shift-plan-list" id="shiftPlanList"></div>
+            <datalist id="shiftPlanSkuCatalog"></datalist>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Экран управления: смены, мастер и настройки. -->
+    <div class="screen" id="screenManagement" data-active="false">
+      <div class="container">
+        <!-- Верх -->
+        <div class="top-bar">
     <div class="panel">
       <div class="panel-header">
         <div class="panel-title">Сотрудник</div>
@@ -1230,269 +1423,86 @@
     </div>
   </div>
 
-  <!-- Центр -->
-  <div class="middle">
-    <div class="panel panel--camera">
-      <div class="panel-header">
-        <div class="panel-title">Рабочий стол (вид сверху)</div>
-      </div>
-      <div class="panel-body">
-        <div class="camera-frame">
-          <img id="cameraImage" class="camera-image" src="" alt="Поток с камеры" />
-          <div id="cameraOverlay" class="camera-overlay"></div>
-        </div>
-        <div class="camera-caption">
-          <span id="cameraHint">
-            Зона контроля: ~3.5–4.0×1.5 м. Следуйте подсветке деталей на столе.
-          </span>
-          <span id="workerStateLabel">Состояние: —</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="right-column">
-      <div class="panel panel--instruction">
-        <div class="panel-header">
-          <div class="panel-title">Текущая команда</div>
-        </div>
-        <div class="panel-body">
-          <div class="instruction-main">
-            <span class="big-icon">🛠️</span>
-            <span id="instructionMain">Ожидание начала упаковки…</span>
+        <div class="panel panel--settings" id="settingsCard">
+          <div class="panel-header">
+            <div class="panel-title">Управление / Настройки</div>
           </div>
-          <div class="instruction-sub" id="instructionSub">
-            Выберите кровать и просканируйте QR-код для старта.
-          </div>
-          <div class="instruction-extra" id="instructionExtra">
-            Голосовые подсказки дублируют текст. Работайте по голосу, на экран поглядывайте только при необходимости.
-          </div>
-        </div>
-      </div>
-
-      <div class="panel panel--pack">
-        <div class="panel-header">
-          <div class="panel-title">Упаковка</div>
-        </div>
-        <div class="panel-body">
-          <div class="pack-row">
-            <div class="pack-main" id="packStateLabel">Состояние: —</div>
-            <div class="pack-state-chip">
-              <span class="dot"></span>
-              <span id="packPhaseLabel">Фаза: —</span>
-            </div>
-          </div>
-          <div class="pack-hint" id="packHint">Сканируйте QR-код кровати (SKU) для старта.</div>
-
-          <div class="pack-current-step">
-            <div class="pack-current-step-title">Текущий шаг</div>
-            <div class="pack-current-step-value" id="packCurrentStep">—</div>
-          </div>
-
-          <div class="pack-available" id="packFlags">
-            <div>Доступно:</div>
-            <div>• —</div>
-          </div>
-
-          <div class="pack-manual-note">
-            <strong>Ручной режим:</strong> кнопки ниже предназначены только для супервайзера.
-          </div>
-
-          <div class="pill-row pill-row--start">
-            <div id="btnManualToggle" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Ручной режим (супервайзер)</span>
-            </div>
-          </div>
-
-          <div class="pill-row manual-controls" id="manualControls">
-            <div id="btnPackStart" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Старт SKU (ручной режим)</span>
-            </div>
-            <div id="btnPackStepComplete" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Шаг выполнен (ручной режим)</span>
-            </div>
-            <div id="btnPackPhaseNext" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Следующая фаза (ручной режим)</span>
-            </div>
-            <div id="btnPackCloseBox" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Закрыть коробку (ручной режим)</span>
-            </div>
-            <div id="btnPackPrintLabel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Печать этикетки (ручной режим)</span>
-            </div>
-            <div id="btnPackTableEmpty" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Стол пустой (ручной режим)</span>
-            </div>
-          </div>
-
-          <div>
-            <div class="panel-title panel-title--compact">Ближайшие шаги</div>
-            <div class="pack-steps-preview" id="packPlanPreview">
-              <div class="pack-step-line">
-                <span>План выкладки будет загружен автоматически</span>
-                <span>—</span>
+          <div class="panel-body">
+            <div class="tabbar">
+              <div class="pill-btn tab tab--active" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Управление</span>
+              </div>
+              <div class="pill-btn tab" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Настройки</span>
               </div>
             </div>
-            <div class="pack-toast" id="packToast"></div>
+            <div class="settings-row">
+              <input id="settingCanReorder" type="checkbox" />
+              <label for="settingCanReorder">Оператор может менять порядок очереди</label>
+            </div>
+            <div class="settings-row">
+              <input id="settingCanEditQty" type="checkbox" />
+              <label for="settingCanEditQty">Оператор может менять количество SKU</label>
+            </div>
+            <div class="settings-row">
+              <label for="settingMasterTimeout" class="settings-label">Таймаут мастера (мин)</label>
+              <input id="settingMasterTimeout" class="settings-input" type="number" min="1" max="240" value="15" />
+            </div>
+            <div class="pill-row pill-row--start">
+              <div id="btnSettingsSave" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Сохранить настройки</span>
+              </div>
+              <div id="btnMasterLogoutSettings" class="pill-btn master-hidden" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Выйти (мастер)</span>
+              </div>
+            </div>
+            <div class="settings-hint" id="settingsHint">
+              Настройки доступны только мастеру. Перед изменением войдите как мастер.
+            </div>
           </div>
         </div>
       </div>
+    </div>
 
-      <div class="panel panel--shift-plan" id="shiftPlanCard">
-        <div class="panel-header">
-          <div class="panel-title">Сменное задание</div>
-        </div>
-        <div class="panel-body">
-          <div class="pack-meta" id="shiftPlanName">План не выбран</div>
-          <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
-          <div class="shift-plan-rename">
-            <input id="shiftPlanRenameInput" class="shift-plan-input" placeholder="Название плана для смены" />
-            <div id="btnShiftPlanRename" class="pill-btn" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Переименовать</span>
+    <!-- Экран статистики: события и показатели. -->
+    <div class="screen" id="screenStats" data-active="false">
+      <div class="container">
+        <div class="bottom">
+          <div class="panel panel--events">
+            <div class="panel-header">
+              <div class="panel-title">Последние события</div>
+            </div>
+            <div class="panel-body">
+              <div class="events-list" id="eventsList"></div>
             </div>
           </div>
-          <div class="shift-plan-controls">
-            <input id="shiftPlanSkuInput" class="shift-plan-input" list="shiftPlanSkuCatalog"
-                   placeholder="SKU из каталога или вручную" />
-            <input id="shiftPlanQtyInput" class="shift-plan-input shift-plan-qty" type="number" min="1"
-                   value="1" placeholder="Количество" />
-            <div id="btnShiftPlanAdd" class="pill-btn" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Добавить</span>
+          <div class="panel panel--stats">
+            <div class="panel-header">
+              <div class="panel-title">Статистика по упаковке этой кровати</div>
             </div>
-          </div>
-          <div class="shift-plan-catalog">
-            <input id="shiftPlanCatalogSearch" class="shift-plan-input"
-                   placeholder="Поиск в каталоге SKU" />
-            <div class="shift-plan-catalog-list" id="shiftPlanCatalogList"></div>
-          </div>
-          <div class="pill-row pill-row--start">
-            <div id="btnShiftPlanRemoveSelected" class="pill-btn" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Удалить выбранное</span>
+            <div class="panel-body">
+              <div class="stats-row">
+                <span class="stats-label">Последняя упаковка</span>
+                <span class="stats-value" id="lastPack">—</span>
+              </div>
+              <div class="stats-row">
+                <span class="stats-label">Лучшее время</span>
+                <span class="stats-value" id="bestPack">—</span>
+              </div>
+              <div class="stats-row">
+                <span class="stats-label">Среднее время</span>
+                <span class="stats-value" id="avgPack">—</span>
+              </div>
+              <div class="stats-note">
+                Время считается по завершённым сессиям упаковки этой модели (по SKU).
+              </div>
             </div>
-            <div id="btnShiftPlanMoveUp" class="pill-btn" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Вверх</span>
-            </div>
-            <div id="btnShiftPlanMoveDown" class="pill-btn" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Вниз</span>
-            </div>
-            <div id="btnShiftPlanUpload" class="pill-btn" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Редактировать список</span>
-            </div>
-            <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Выбрать из списка</span>
-            </div>
-          </div>
-          <div class="pack-meta">Текущий список на смену</div>
-          <div class="shift-plan-list" id="shiftPlanList"></div>
-          <datalist id="shiftPlanSkuCatalog"></datalist>
-        </div>
-      </div>
-
-      <div class="panel panel--settings" id="settingsCard">
-        <div class="panel-header">
-          <div class="panel-title">Управление / Настройки</div>
-        </div>
-        <div class="panel-body">
-          <div class="tabbar">
-            <div class="pill-btn tab tab--active" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Управление</span>
-            </div>
-            <div class="pill-btn tab" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Настройки</span>
-            </div>
-          </div>
-          <div class="settings-row">
-            <input id="settingCanReorder" type="checkbox" />
-            <label for="settingCanReorder">Оператор может менять порядок очереди</label>
-          </div>
-          <div class="settings-row">
-            <input id="settingCanEditQty" type="checkbox" />
-            <label for="settingCanEditQty">Оператор может менять количество SKU</label>
-          </div>
-          <div class="settings-row">
-            <label for="settingMasterTimeout" class="settings-label">Таймаут мастера (мин)</label>
-            <input id="settingMasterTimeout" class="settings-input" type="number" min="1" max="240" value="15" />
-          </div>
-          <div class="pill-row pill-row--start">
-            <div id="btnSettingsSave" class="pill-btn" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Сохранить настройки</span>
-            </div>
-            <div id="btnMasterLogoutSettings" class="pill-btn master-hidden" role="button" tabindex="0">
-              <span class="dot"></span>
-              <span>Выйти (мастер)</span>
-            </div>
-          </div>
-          <div class="settings-hint" id="settingsHint">
-            Настройки доступны только мастеру. Перед изменением войдите как мастер.
-          </div>
-        </div>
-      </div>
-
-      <div class="panel panel--steps">
-        <div class="panel-header">
-          <div class="panel-title">Прогресс комплекта</div>
-        </div>
-        <div class="panel-body">
-          <div class="steps-summary-row">
-            <div id="stepsSummary">Шаг 0 из 0</div>
-            <div class="text-muted-sm" id="stepsCounters">
-              0 проверено, 0 ошибок
-            </div>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-fill" id="progressFill"></div>
           </div>
           <div class="steps-list" id="stepsList"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Низ -->
-  <div class="bottom">
-    <div class="panel panel--events">
-      <div class="panel-header">
-        <div class="panel-title">Последние события</div>
-      </div>
-      <div class="panel-body">
-        <div class="events-list" id="eventsList"></div>
-      </div>
-    </div>
-    <div class="panel panel--stats">
-      <div class="panel-header">
-        <div class="panel-title">Статистика по упаковке этой кровати</div>
-      </div>
-      <div class="panel-body">
-        <div class="stats-row">
-          <span class="stats-label">Последняя упаковка</span>
-          <span class="stats-value" id="lastPack">—</span>
-        </div>
-        <div class="stats-row">
-          <span class="stats-label">Лучшее время</span>
-          <span class="stats-value" id="bestPack">—</span>
-        </div>
-        <div class="stats-row">
-          <span class="stats-label">Среднее время</span>
-          <span class="stats-value" id="avgPack">—</span>
-        </div>
-        <div class="stats-note">
-          Время считается по завершённым сессиям упаковки этой модели (по SKU).
         </div>
       </div>
     </div>
@@ -1615,32 +1625,6 @@
       <div class="modal-actions" id="masterLoginActions"></div>
       <div class="modal-actions modal-actions--footer">
         <div id="masterLoginCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
-          <span class="dot"></span>
-          <span>ОТМЕНА</span>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Модалка входа мастера -->
-<div id="masterLoginBackdrop" class="modal-backdrop" aria-hidden="true">
-  <div class="modal" role="dialog" aria-modal="true">
-    <div class="modal-content">
-      <div>
-        <div class="modal-title">Вход мастера</div>
-        <div class="modal-sub">Отсканируйте QR-код мастера формата M########.</div>
-      </div>
-      <div class="modal-scan">
-        <div style="flex:1;">
-          QR: <input id="masterLoginInput" type="text" placeholder="Например, M13540876"
-                     style="width:100%; background:transparent; border:none; color:#e0f2fe; font-size:15px;">
-        </div>
-        <div id="masterLoginHint" style="font-size:13px; color: var(--text-muted);">Ожидание сканирования…</div>
-      </div>
-      <div class="modal-actions" id="masterLoginActions"></div>
-      <div class="modal-footer">
-        <div id="masterLoginCancel" class="action-pill modal-cancel-pill" role="button" tabindex="0">
           <span class="dot"></span>
           <span>ОТМЕНА</span>
         </div>

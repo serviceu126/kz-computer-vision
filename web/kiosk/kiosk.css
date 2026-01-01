@@ -45,6 +45,21 @@
   opacity: 1;
 }
 
+/* Контейнеры экранов: один экран видим, остальные скрыты. */
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xl);
+}
+
+.screen {
+  display: none;
+}
+
+.screen[data-active="true"] {
+  display: block;
+}
+
 /* Элементы формы в настройках. */
 .settings-input {
   width: 100%;
