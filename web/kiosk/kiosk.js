@@ -5,6 +5,9 @@
   const API_MASTER_LOGOUT_URL = "/api/kiosk/master/logout";
   const API_SETTINGS_URL = "/api/kiosk/settings";
   const API_SKU_URL = "/api/kiosk/sku";
+  const API_REPORT_PREVIEW_URL = "/api/kiosk/reports/preview";
+  const API_REPORT_EXPORT_URL = "/api/kiosk/reports/export";
+  const API_REPORT_USB_URL = "/api/kiosk/reports/save_to_usb";
 
   // UI-элементы мастера: кнопки, модалка, статус.
   const btnMasterLogin = document.getElementById("btnMasterLogin");
@@ -19,6 +22,7 @@
 
   // Вкладка "Управление" доступна только мастеру.
   const tabManagement = document.getElementById("tabManagement");
+  const tabReports = document.getElementById("tabReports");
 
   // Чекбоксы настроек.
   const settingCanReorder = document.getElementById("settingCanReorder");
@@ -46,6 +50,17 @@
   const skuName = document.getElementById("skuName");
   const skuIsActive = document.getElementById("skuIsActive");
   const skuPreviewValue = document.getElementById("skuPreviewValue");
+
+  // Отчёты: элементы управления и контейнер предпросмотра.
+  const reportType = document.getElementById("reportType");
+  const reportDateFrom = document.getElementById("reportDateFrom");
+  const reportDateTo = document.getElementById("reportDateTo");
+  const btnReportPreview = document.getElementById("btnReportPreview");
+  const reportsPreview = document.getElementById("reportsPreview");
+  const btnReportDownloadCsv = document.getElementById("btnReportDownloadCsv");
+  const btnReportDownloadXlsx = document.getElementById("btnReportDownloadXlsx");
+  const btnReportUsbCsv = document.getElementById("btnReportUsbCsv");
+  const btnReportUsbXlsx = document.getElementById("btnReportUsbXlsx");
 
   let masterModalOpen = false;
   let currentMasterId = null;
@@ -100,20 +115,24 @@
 
   function updateManagementTabVisibility() {
     /**
-     * Показываем вкладку "Управление" только мастеру.
+     * Показываем вкладки "Управление" и "Отчёты" только мастеру.
      *
      * Почему так:
      * - оператору не нужны мастер-настройки;
      * - меньше лишних элементов и ошибок в интерфейсе.
      */
-    if (!tabManagement) return;
     const isMaster = !!currentMasterId;
-    tabManagement.classList.toggle("tab--hidden", !isMaster);
+    if (tabManagement) {
+      tabManagement.classList.toggle("tab--hidden", !isMaster);
+    }
+    if (tabReports) {
+      tabReports.classList.toggle("tab--hidden", !isMaster);
+    }
 
-    // Если мастер вышел и мы были на "Управлении", возвращаемся к "Оператору".
+    // Если мастер вышел и мы были на "Управлении" или "Отчётах", возвращаемся к "Оператору".
     if (!isMaster && window.activateMainTab) {
       const activeScreen = document.querySelector(".screen[data-active='true']");
-      if (activeScreen && activeScreen.id === "screenManagement") {
+      if (activeScreen && (activeScreen.id === "screenManagement" || activeScreen.id === "screenReports")) {
         window.activateMainTab("screenOperator");
       }
     }
@@ -385,6 +404,152 @@
       renderSkuCatalog(data.items || []);
     } catch (error) {
       // Сетевые ошибки не блокируют UI, просто оставляем список как есть.
+    }
+  }
+
+  function getReportHeaders(type) {
+    if (type === "employees") {
+      return ["worker_id", "packed_count", "worktime_sec", "downtime_sec"];
+    }
+    if (type === "sku") {
+      return ["sku", "packed_count"];
+    }
+    return ["shift_id", "worker_id", "start_time", "finish_time", "packed_count"];
+  }
+
+  function renderReportPreview(rows, headers) {
+    if (!reportsPreview) return;
+    reportsPreview.innerHTML = "";
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "settings-hint";
+      empty.textContent = "Нет данных за выбранный период.";
+      reportsPreview.appendChild(empty);
+      return;
+    }
+    const table = document.createElement("table");
+    table.className = "reports-table";
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    headers.forEach((header) => {
+      const th = document.createElement("th");
+      th.textContent = header;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      headers.forEach((header) => {
+        const td = document.createElement("td");
+        td.textContent = row[header] ?? "";
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    reportsPreview.appendChild(table);
+  }
+
+  function getReportParams() {
+    return {
+      type: reportType?.value || "employees",
+      date_from: reportDateFrom?.value || "",
+      date_to: reportDateTo?.value || "",
+    };
+  }
+
+  async function fetchReportPreview() {
+    /**
+     * Загружаем первые 50 строк для предпросмотра.
+     */
+    if (!currentMasterId) return;
+    const params = getReportParams();
+    if (!params.date_from || !params.date_to) {
+      window.showPackToast?.("Выберите период отчёта.");
+      return;
+    }
+    const url = new URL(API_REPORT_PREVIEW_URL, window.location.origin);
+    url.searchParams.set("type", params.type);
+    url.searchParams.set("date_from", params.date_from);
+    url.searchParams.set("date_to", params.date_to);
+    try {
+      const resp = await fetch(url.toString(), { cache: "no-store" });
+      if (!resp.ok) {
+        window.showPackToast?.("Не удалось загрузить предпросмотр.");
+        return;
+      }
+      const data = await resp.json();
+      renderReportPreview(data.rows || [], getReportHeaders(params.type));
+    } catch (error) {
+      window.showPackToast?.("Ошибка сети: предпросмотр не загружен.");
+    }
+  }
+
+  function triggerReportDownload(format) {
+    /**
+     * Скачиваем отчёт через прямую ссылку, чтобы браузер сохранил файл.
+     */
+    if (!currentMasterId) return;
+    const params = getReportParams();
+    if (!params.date_from || !params.date_to) {
+      window.showPackToast?.("Выберите период отчёта.");
+      return;
+    }
+    const url = new URL(API_REPORT_EXPORT_URL, window.location.origin);
+    url.searchParams.set("type", params.type);
+    url.searchParams.set("date_from", params.date_from);
+    url.searchParams.set("date_to", params.date_to);
+    url.searchParams.set("format", format);
+    window.location.href = url.toString();
+  }
+
+  async function saveReportToUsb(format) {
+    /**
+     * Просим backend сохранить отчёт на USB и возвращаем путь.
+     */
+    if (!currentMasterId) return;
+    const params = getReportParams();
+    if (!params.date_from || !params.date_to) {
+      window.showPackToast?.("Выберите период отчёта.");
+      return;
+    }
+    const payload = {
+      report_type: params.type,
+      date_from: params.date_from,
+      date_to: params.date_to,
+      format,
+    };
+    try {
+      const resp = await fetch(API_REPORT_USB_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({}));
+        window.showPackToast?.(detail.detail || "Не удалось сохранить отчёт.");
+        return;
+      }
+      const data = await resp.json();
+      window.showPackToast?.(`Файл сохранён: ${data.path}`);
+    } catch (error) {
+      window.showPackToast?.("Ошибка сети: отчёт не сохранён.");
+    }
+  }
+
+  function setReportDefaultDates() {
+    /**
+     * По умолчанию ставим сегодняшний день, чтобы отчёт строился без лишних шагов.
+     */
+    const today = new Date().toISOString().slice(0, 10);
+    if (reportDateFrom && !reportDateFrom.value) {
+      reportDateFrom.value = today;
+    }
+    if (reportDateTo && !reportDateTo.value) {
+      reportDateTo.value = today;
     }
   }
 
@@ -720,9 +885,26 @@
     field.addEventListener("input", () => buildSkuPreview());
   });
 
+  if (btnReportPreview) {
+    btnReportPreview.addEventListener("click", () => fetchReportPreview());
+  }
+  if (btnReportDownloadCsv) {
+    btnReportDownloadCsv.addEventListener("click", () => triggerReportDownload("csv"));
+  }
+  if (btnReportDownloadXlsx) {
+    btnReportDownloadXlsx.addEventListener("click", () => triggerReportDownload("xlsx"));
+  }
+  if (btnReportUsbCsv) {
+    btnReportUsbCsv.addEventListener("click", () => saveReportToUsb("csv"));
+  }
+  if (btnReportUsbXlsx) {
+    btnReportUsbXlsx.addEventListener("click", () => saveReportToUsb("xlsx"));
+  }
+
   // Стартовая синхронизация настроек.
   updateSettingsAvailability();
   fetchSettings();
   initMainTabs();
   fetchSkuCatalog();
+  setReportDefaultDates();
 })();

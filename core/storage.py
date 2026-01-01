@@ -295,6 +295,91 @@ def set_master_session(master_id: str, last_active_ts: int) -> None:
     )
     conn.commit()
     conn.close()
+    return int(sku_id or 0)
+
+
+def update_sku_catalog_item(
+    sku_id: int,
+    name: str | None = None,
+    is_active: int | None = None,
+) -> None:
+    """
+    Обновляет поля name / is_active у SKU.
+
+    Другие поля не трогаем, чтобы не ломать код SKU.
+    """
+    fields = []
+    params: list = []
+    if name is not None:
+        fields.append("name=?")
+        params.append(name)
+    if is_active is not None:
+        fields.append("is_active=?")
+        params.append(int(is_active))
+    if not fields:
+        return
+    fields.append("updated_at=?")
+    params.append(int(time.time()))
+    params.append(int(sku_id))
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        f"UPDATE sku_catalog SET {', '.join(fields)} WHERE id=?",
+        params,
+    )
+    conn.commit()
+    conn.close()
+
+
+def clear_master_session() -> None:
+    """
+    Отключает мастер-режим.
+
+    Мы очищаем master_id и таймштамп, чтобы UI видел пустое состояние.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE kiosk_master_session
+           SET master_id=NULL, last_active_ts=NULL, enabled=0
+           WHERE id=1"""
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_master_last_active(last_active_ts: int) -> None:
+    """
+    Обновляет время последней активности мастера.
+
+    Этот метод вызываем при любых мастер-действиях,
+    чтобы таймаут отсчитывался корректно.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE kiosk_master_session
+           SET last_active_ts=?
+           WHERE id=1 AND enabled=1""",
+        [int(last_active_ts)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_kiosk_settings(keys: list[str]) -> dict[str, int]:
+    # Массовое чтение настроек.
+    # Это ускоряет UI-запросы и упрощает обработку.
+    conn = get_conn()
+    cur = conn.cursor()
+    placeholders = ",".join("?" for _ in keys)
+    cur.execute(
+        f"SELECT key, value FROM kiosk_settings WHERE key IN ({placeholders})",
+        keys,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return {row["key"]: int(row["value"] or 0) for row in (rows or [])}
 
 
 def clear_master_session() -> None:
@@ -438,55 +523,67 @@ def update_sku_catalog_item(
     conn.close()
 
 
-def clear_master_session() -> None:
+def get_report_rows(report_type: str, date_from: str, date_to: str) -> list[dict]:
     """
-    Отключает мастер-режим.
+    Формирует строки отчёта по типу и диапазону дат.
 
-    Мы очищаем master_id и таймштамп, чтобы UI видел пустое состояние.
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """UPDATE kiosk_master_session
-           SET master_id=NULL, last_active_ts=NULL, enabled=0
-           WHERE id=1"""
-    )
-    conn.commit()
-    conn.close()
-
-
-def update_master_last_active(last_active_ts: int) -> None:
-    """
-    Обновляет время последней активности мастера.
-
-    Этот метод вызываем при любых мастер-действиях,
-    чтобы таймаут отсчитывался корректно.
+    Мы возвращаем простые словари, чтобы API мог легко
+    строить CSV/XLSX без дополнительной обработки.
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        """UPDATE kiosk_master_session
-           SET last_active_ts=?
-           WHERE id=1 AND enabled=1""",
-        [int(last_active_ts)],
-    )
-    conn.commit()
-    conn.close()
 
+    # Даты приходят строками YYYY-MM-DD, превращаем их в unix time (секунды).
+    # Это простой и понятный формат для SQL-фильтров по времени.
+    start_ts = int(time.mktime(time.strptime(date_from, "%Y-%m-%d")))
+    end_ts = int(time.mktime(time.strptime(date_to, "%Y-%m-%d"))) + 86399
 
-def get_kiosk_settings(keys: list[str]) -> dict[str, int]:
-    # Массовое чтение настроек.
-    # Это ускоряет UI-запросы и упрощает обработку.
-    conn = get_conn()
-    cur = conn.cursor()
-    placeholders = ",".join("?" for _ in keys)
+    if report_type == "employees":
+        cur.execute(
+            """SELECT worker_id,
+                      COUNT(*) AS packed_count,
+                      COALESCE(SUM(worktime_sec), 0) AS worktime_sec,
+                      COALESCE(SUM(downtime_sec), 0) AS downtime_sec
+               FROM sessions
+               WHERE start_time BETWEEN ? AND ?
+               GROUP BY worker_id
+               ORDER BY packed_count DESC""",
+            [start_ts, end_ts],
+        )
+        rows = cur.fetchall() or []
+        conn.close()
+        return [dict(row) for row in rows]
+
+    if report_type == "sku":
+        cur.execute(
+            """SELECT product_code AS sku,
+                      COUNT(*) AS packed_count
+               FROM sessions
+               WHERE start_time BETWEEN ? AND ?
+               GROUP BY product_code
+               ORDER BY packed_count DESC""",
+            [start_ts, end_ts],
+        )
+        rows = cur.fetchall() or []
+        conn.close()
+        return [dict(row) for row in rows]
+
+    # Отчёт по сменам: даём по каждой смене краткую сводку.
     cur.execute(
-        f"SELECT key, value FROM kiosk_settings WHERE key IN ({placeholders})",
-        keys,
+        """SELECT shift_id,
+                  worker_id,
+                  MIN(start_time) AS start_time,
+                  MAX(finish_time) AS finish_time,
+                  COUNT(*) AS packed_count
+           FROM sessions
+           WHERE start_time BETWEEN ? AND ?
+           GROUP BY shift_id, worker_id
+           ORDER BY start_time DESC""",
+        [start_ts, end_ts],
     )
-    rows = cur.fetchall()
+    rows = cur.fetchall() or []
     conn.close()
-    return {row["key"]: int(row["value"] or 0) for row in (rows or [])}
+    return [dict(row) for row in rows]
 
 
 def save_session(session) -> int:

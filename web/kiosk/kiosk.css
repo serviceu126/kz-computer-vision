@@ -295,6 +295,56 @@
   margin-top: var(--space-xs);
 }
 
+/* Отчёты: форма параметров и предпросмотр должны быть читаемыми. */
+.reports-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-md);
+  align-items: end;
+}
+
+.reports-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.reports-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.reports-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.reports-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-sm);
+}
+
+.reports-table th,
+.reports-table td {
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: var(--border-default);
+}
+
+.reports-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.reports-export {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  justify-content: flex-start;
+}
+
 .modal-input {
   width: 100%;
   background: transparent;

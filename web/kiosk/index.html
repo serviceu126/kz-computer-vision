@@ -1142,6 +1142,11 @@
       <span class="dot"></span>
       <span>Управление</span>
     </div>
+    <!-- Вкладка "Отчёты" доступна только мастеру, поэтому прячем её по умолчанию. -->
+    <div class="pill-btn tab tab--hidden" role="button" tabindex="0" data-screen="screenReports" id="tabReports">
+      <span class="dot"></span>
+      <span>Отчёты</span>
+    </div>
     <div class="pill-btn tab" role="button" tabindex="0" data-screen="screenStats">
       <span class="dot"></span>
       <span>Статистика</span>
@@ -1525,6 +1530,8 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
 
         <!-- Каталог SKU: базовый справочник, доступный только мастеру. -->
         <div class="panel" id="skuCatalogPanel">
@@ -1542,6 +1549,31 @@
             <div class="sku-catalog-list" id="skuCatalogList">
               <!-- Записи заполняются через JS, чтобы не дублировать логику в HTML. -->
             </div>
+            <div class="pill-row pill-row--start">
+              <div id="btnShiftPlanRemoveSelected" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Удалить выбранное</span>
+              </div>
+              <div id="btnShiftPlanMoveUp" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Вверх</span>
+              </div>
+              <div id="btnShiftPlanMoveDown" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Вниз</span>
+              </div>
+              <div id="btnShiftPlanUpload" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Редактировать список</span>
+              </div>
+              <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Выбрать из списка</span>
+              </div>
+            </div>
+            <div class="pack-meta">Текущий список на смену</div>
+            <div class="shift-plan-list" id="shiftPlanList"></div>
+            <datalist id="shiftPlanSkuCatalog"></datalist>
           </div>
         </div>
       </div>
@@ -1594,7 +1626,84 @@
               Отчёты обновляются автоматически при поступлении данных.
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Экран отчётов: доступен только мастеру, чтобы не мешать оператору. -->
+    <div class="screen" id="screenReports" data-active="false">
+      <div class="container screen-content screen-content--compact">
+        <div class="panel" id="reportsParamsPanel">
+          <div class="panel-header">
+            <div class="panel-title">Параметры</div>
+          </div>
+          <div class="panel-body">
+            <div class="reports-form">
+              <div class="reports-field">
+                <label class="settings-label" for="reportType">Тип отчёта</label>
+                <select id="reportType" class="settings-input">
+                  <option value="employees">Сотрудники</option>
+                  <option value="sku">SKU</option>
+                  <option value="shifts">Смены</option>
+                </select>
+              </div>
+              <div class="reports-field">
+                <label class="settings-label" for="reportDateFrom">Дата с</label>
+                <input id="reportDateFrom" class="settings-input" type="date" />
+              </div>
+              <div class="reports-field">
+                <label class="settings-label" for="reportDateTo">Дата по</label>
+                <input id="reportDateTo" class="settings-input" type="date" />
+              </div>
+              <div class="reports-actions">
+                <div id="btnReportPreview" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Обновить предпросмотр</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="reportsPreviewPanel">
+          <div class="panel-header">
+            <div class="panel-title">Предпросмотр</div>
+          </div>
+          <div class="panel-body">
+            <div class="reports-preview" id="reportsPreview">
+              <div class="settings-hint">Выберите параметры и нажмите «Обновить предпросмотр».</div>
+            </div>
+          </div>
           <div class="steps-list" id="stepsList"></div>
+        </div>
+
+        <div class="panel" id="reportsExportPanel">
+          <div class="panel-header">
+            <div class="panel-title">Экспорт</div>
+          </div>
+          <div class="panel-body">
+            <div class="reports-export">
+              <div id="btnReportDownloadCsv" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Скачать CSV</span>
+              </div>
+              <div id="btnReportDownloadXlsx" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Скачать XLSX</span>
+              </div>
+              <div id="btnReportUsbCsv" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Сохранить на USB (CSV)</span>
+              </div>
+              <div id="btnReportUsbXlsx" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Сохранить на USB (XLSX)</span>
+              </div>
+            </div>
+            <div class="settings-hint" id="reportsHint">
+              Экспорт доступен только в мастер-режиме.
+            </div>
+          </div>
         </div>
       </div>
     </div>

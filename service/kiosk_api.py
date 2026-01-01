@@ -6,9 +6,12 @@ import time
 import sqlite3
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from openpyxl import Workbook
+import csv
+import io
 
 from core.logic import engine, KioskUIState
 from core.storage import (
@@ -28,6 +31,7 @@ from core.storage import (
     list_sku_catalog,
     create_sku_catalog_item,
     update_sku_catalog_item,
+    get_report_rows,
 )
 from services.packaging import (
     advance_phase,
@@ -212,6 +216,13 @@ class SkuUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
+class ReportSaveRequest(BaseModel):
+    report_type: str
+    date_from: str
+    date_to: str
+    format: Literal["csv", "xlsx"]
+
+
 def update_master_activity():
     # Фиксируем время последнего действия мастера в базе.
     # Так таймаут считается устойчиво, даже после перезапуска сервиса.
@@ -260,6 +271,76 @@ def ensure_master_mode() -> dict:
     if not session.get("enabled"):
         raise HTTPException(status_code=403, detail="Доступно только в мастер-режиме.")
     return session
+
+
+def validate_report_params(report_type: str, date_from: str, date_to: str) -> None:
+    """
+    Проверяем параметры отчёта, чтобы backend не падал на неверных датах.
+    """
+    if report_type not in {"employees", "sku", "shifts"}:
+        raise HTTPException(status_code=400, detail="Неизвестный тип отчёта.")
+    try:
+        time.strptime(date_from, "%Y-%m-%d")
+        time.strptime(date_to, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD.") from exc
+
+
+def build_report_headers(report_type: str) -> list[str]:
+    # Подбираем заголовки столбцов под каждый тип отчёта.
+    if report_type == "employees":
+        return ["worker_id", "packed_count", "worktime_sec", "downtime_sec"]
+    if report_type == "sku":
+        return ["sku", "packed_count"]
+    return ["shift_id", "worker_id", "start_time", "finish_time", "packed_count"]
+
+
+def build_report_csv(rows: list[dict], headers: list[str]) -> bytes:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([row.get(col, "") for col in headers])
+    return output.getvalue().encode("utf-8")
+
+
+def build_report_xlsx(rows: list[dict], headers: list[str]) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append(headers)
+    for row in rows:
+        ws.append([row.get(col, "") for col in headers])
+    # Простейшая настройка ширины колонок, чтобы текст не слипался.
+    for idx, header in enumerate(headers, start=1):
+        ws.column_dimensions[chr(64 + idx)].width = max(12, len(header) + 2)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def find_usb_mounts() -> list[Path]:
+    """
+    Ищем смонтированные USB-носители в типичных папках Linux.
+    """
+    roots = [Path("/media"), Path("/run/media")]
+    mounts: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.glob("*/*"):
+            if path.is_dir():
+                mounts.append(path)
+    return mounts
+
+
+def build_usb_report_path(base_dir: Path, filename: str) -> Path:
+    """
+    Формируем путь и проверяем, что он остаётся внутри USB директории.
+    """
+    target = (base_dir / filename).resolve()
+    if base_dir.resolve() not in target.parents and target != base_dir.resolve():
+        raise HTTPException(status_code=400, detail="Некорректный путь файла.")
+    return target
 
 
 app = FastAPI(title="KZ Kiosk API")
@@ -344,6 +425,59 @@ async def get_state():
         ],
         master_mode=bool(master_id),
         master_id=master_id,
+    )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
+
+
+@app.post("/api/kiosk/master/login")
+async def master_login(payload: MasterLoginRequest):
+    """
+    Вход в режим мастера по QR-коду.
+
+    Формат:
+    - буква M и 8 цифр (например, M13540876).
+    Почему так:
+    - формат легко распознаётся сканером;
+    - мы быстро валидируем его без внешних сервисов.
+    """
+    qr_text = (payload.qr_text or "").strip()
+    match = re.fullmatch(r"M(\d{8})", qr_text)
+    if not match:
+        raise HTTPException(
+            status_code=400,
+            detail="Неверный QR мастера. Ожидается формат M######## (например, M13540876).",
+        )
+    master_id = match.group(1)
+    set_master_session(master_id=master_id, last_active_ts=int(time.time()))
+    add_event(
+        event_type="master_login",
+        ts=time.time(),
+        payload_json=json.dumps({"master_id": master_id}, ensure_ascii=False),
+        shift_id=get_active_shift_id(),
     )
     return {"status": "ok", "master_id": master_id}
 
@@ -906,6 +1040,76 @@ async def sku_update(sku_id: int, payload: SkuUpdateRequest):
         is_active=1 if payload.is_active else (0 if payload.is_active is False else None),
     )
     return {"status": "ok"}
+
+
+@app.get("/api/kiosk/reports/preview")
+async def report_preview(
+    report_type: str = Query(..., alias="type"),
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+):
+    """
+    Возвращает первые 50 строк отчёта для предпросмотра.
+    """
+    ensure_master_mode()
+    validate_report_params(report_type, date_from, date_to)
+    rows = get_report_rows(report_type, date_from, date_to)[:50]
+    return {"status": "ok", "rows": rows}
+
+
+@app.get("/api/kiosk/reports/export")
+async def report_export(
+    report_type: str = Query(..., alias="type"),
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    format: Literal["csv", "xlsx"] = Query("csv"),
+):
+    """
+    Экспортирует отчёт в CSV/XLSX и отдаёт файл на скачивание.
+    """
+    ensure_master_mode()
+    validate_report_params(report_type, date_from, date_to)
+    rows = get_report_rows(report_type, date_from, date_to)
+    headers = build_report_headers(report_type)
+    if format == "xlsx":
+        content = build_report_xlsx(rows, headers)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        content = build_report_csv(rows, headers)
+        media_type = "text/csv"
+    filename = f"report_{report_type}_{date_from}_{date_to}.{format}"
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/kiosk/reports/save_to_usb")
+async def report_save_to_usb(payload: ReportSaveRequest):
+    """
+    Сохраняет отчёт на USB-носитель.
+    """
+    ensure_master_mode()
+    validate_report_params(payload.report_type, payload.date_from, payload.date_to)
+    mounts = find_usb_mounts()
+    if not mounts:
+        raise HTTPException(status_code=404, detail="USB not found")
+    target_dir = mounts[0]
+    timestamp = int(time.time())
+    filename = (
+        f"report_{payload.report_type}_{payload.date_from}_{payload.date_to}_{timestamp}."
+        f"{payload.format}"
+    )
+    target_path = build_usb_report_path(target_dir, filename)
+    rows = get_report_rows(payload.report_type, payload.date_from, payload.date_to)
+    headers = build_report_headers(payload.report_type)
+    if payload.format == "xlsx":
+        content = build_report_xlsx(rows, headers)
+    else:
+        content = build_report_csv(rows, headers)
+    target_path.write_bytes(content)
+    return {"status": "ok", "path": str(target_path)}
 
 
 @app.get("/api/kiosk/pack/plan")
