@@ -1,0 +1,465 @@
+/* Общие переопределения и дополнения стилей для киоска.
+   Этот файл содержит только компонентные классы,
+   чтобы UI оставался единым и предсказуемым. */
+
+/* Список утверждённых компонентных классов:
+   - panel / panel-header / panel-title / panel-title--compact / panel-main / panel-main--compact / panel-body: базовая карточка.
+   - panel--camera / panel--instruction / panel--pack / panel--shift-plan / panel--settings / panel--steps / panel--events / panel--stats: варианты панели.
+   - pill-btn / pill-btn--primary / pill-btn--danger / pill-btn--ghost / pill-btn--active / pill-btn--disabled / pill-btn--mini: кнопки-пилюли.
+   - pill-row / pill-row--start: ряды кнопок.
+   - tabbar / tab / tab--active: вкладки.
+   - modal / modal-backdrop / modal-content / modal-title / modal-sub / modal-scan / modal-actions / modal-actions--footer: модальные окна.
+   - modal-hint / modal-input / modal-input-wrap: элементы модалки.
+   - settings-row / settings-label / settings-input / settings-hint: блок настроек.
+   - steps-summary-row / text-muted-sm / stats-note: вспомогательные текстовые элементы.
+   - pack-row / pack-main / pack-hint / pack-state-chip / pack-current-step / pack-current-step-title / pack-current-step-value / pack-available / pack-manual-note / pack-steps-preview / pack-step-line / pack-toast: упаковочный блок.
+   - shift-plan-rename / shift-plan-controls / shift-plan-input / shift-plan-qty / shift-plan-catalog / shift-plan-catalog-list / shift-plan-list / shift-plan-row: сменный план.
+   - manual-controls / master-status / master-hidden / scan-debug: состояния интерфейса.
+   - app / logo-bar / logo-img / top-bar / middle / right-column / bottom: каркас страницы.
+   - badge / dot / status-pill / status-ok / status-warn / status-error: статусные метки.
+   - timer / timers / timer-chip / timer-chip-label / timer-chip-value: таймеры.
+   - camera-frame / camera-image / camera-overlay / camera-caption / slot / slot-title / slot-status: камера и подсветка.
+   - steps-list / step-row / step-index / step-title / step-meta: список шагов.
+   - events-list / event-row / event-time / event-text: список событий.
+   - stats-row / stats-label / stats-value: статистика.
+   - status-strip / status-strip.warn / status-strip.error: полоска состояния.
+   Эти классы перечислены здесь, чтобы избежать случайных "одноразовых" стилей. */
+
+/* Делаем модалки шире для лучшей читаемости. */
+.modal {
+  width: min(var(--modal-max-width), 98vw);
+}
+
+/* Вкладки в блоке управления. */
+.tabbar {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+/* Вкладки не получают отдельный стиль: визуально они такие же pill-кнопки. */
+.tab {
+  opacity: 0.7;
+}
+
+.tab--active {
+  opacity: 1;
+}
+
+/* Активная вкладка должна выглядеть как зелёная "пилюля" действий. */
+.tab.pill-btn--active {
+  background: var(--surface-success);
+  border: var(--border-accent);
+  box-shadow: var(--shadow-pill);
+  color: var(--text-main);
+}
+
+/* Мастер-вкладки и экраны скрываем, если мастер-режим не активен. */
+body:not(.is-master-active) .tab--master {
+  display: none;
+}
+
+body:not(.is-master-active) .screen--master {
+  display: none;
+}
+
+/* Прячем вкладку, если мастер-режим выключен. */
+.tab--hidden {
+  display: none;
+}
+
+/* Контейнеры экранов: один экран видим, остальные скрыты. */
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xl);
+}
+
+/* Область вкладок занимает остаток высоты и не растягивает страницу. */
+.screens {
+  flex: 1;
+  min-height: 0;
+}
+
+.screen {
+  display: none;
+  flex: 1;
+  min-height: 0;
+}
+
+.screen[data-active="true"] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Контент внутри вкладки ограничиваем по высоте, чтобы скролл был локальным. */
+/* Контент вкладки живёт в границах экрана, скролл — только внутри вкладок/панелей. */
+.screen-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2xl) 0;
+}
+
+/* Оператор: фиксируем три строки (верх/центр/низ) для стабильной высоты. */
+.screen-content--operator {
+  display: grid;
+  /* Сетка оператора: верх — компактный, центр — главный, низ — компактный. */
+  grid-template-rows: auto minmax(0, 1fr) minmax(180px, 0.35fr);
+  grid-template-areas:
+    "top"
+    "middle"
+    "bottom";
+  gap: var(--space-2xl);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Статистика: допускаем прокрутку внутри колонок, без роста страницы. */
+/* На статистике допускаем общий скролл вкладки, чтобы карточки не ломали высоту. */
+.screen-content--stats {
+  overflow-y: auto;
+}
+
+/* Компактные вкладки (очередь/управление/статистика) держим в центре, чтобы не растягивать на весь экран. */
+.screen-content--compact {
+  max-width: var(--modal-max-width);
+  width: 100%;
+  margin: 0 auto;
+  /* Компактные вкладки читаются лучше с внутренними отступами. */
+  padding: var(--space-2xl) var(--space-3xl);
+}
+
+/* Три ключевые зоны оператора должны уметь сжиматься внутри экрана. */
+.top-bar,
+.middle,
+.bottom {
+  min-height: 0;
+}
+
+/* Привязываем основные блоки оператора к областям сетки. */
+.top-bar {
+  grid-area: top;
+}
+
+.middle {
+  grid-area: middle;
+}
+
+.bottom {
+  grid-area: bottom;
+}
+
+.bottom {
+  overflow: hidden;
+}
+
+/* Средняя зона: фиксируем ширину правой колонки, чтобы камера была крупной. */
+.middle {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+}
+
+/* Нижняя строка должна быть компактной, поэтому задаём общую высоту. */
+.bottom {
+  min-height: 180px;
+  max-height: 220px;
+}
+
+/* Камера должна вписываться в доступное место, не расширяя экран. */
+.panel--camera,
+.camera-frame {
+  min-height: 0;
+}
+
+/* Камеру растягиваем на всё поле, чтобы не было пустых полос. */
+.camera-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Правая колонка может прокручиваться, если блоки не помещаются. */
+.right-column {
+  overflow-y: auto;
+}
+
+/* Прогресс комплекта делаем заметнее, чтобы он не превращался в тонкую полоску. */
+.panel--steps {
+  min-height: 240px;
+}
+
+/* Список событий прокручивается внутри панели, а не всей страницы. */
+.panel--events .panel-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.events-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Прогресс шагов тоже скроллим внутри панели. */
+.panel--steps .panel-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.steps-list {
+  min-height: 0;
+}
+
+/* Элементы формы в настройках. */
+.settings-input {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: var(--border-default);
+  background: rgba(2, 6, 23, 0.55);
+  color: var(--text-main);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-sm);
+}
+
+.settings-label {
+  min-width: var(--size-settings-label);
+}
+
+/* Структура блока "Управление / Настройки": делаем ясные секции и отступы. */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+.settings-section:first-of-type {
+  margin-top: var(--space-md);
+}
+
+.settings-section-title {
+  font-size: var(--font-sm);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Каждый чекбокс в отдельной строке, чтобы удобно читать с расстояния. */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* Строка для числового поля таймаута: подпись и поле выровнены. */
+.settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(140px, 1fr);
+  align-items: center;
+  gap: var(--space-md);
+}
+
+/* Кнопки действий фиксируем внизу и выравниваем вправо. */
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-md);
+  margin-top: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+/* Каталог SKU: панель поиска и список должны быть удобны для мастера. */
+.sku-catalog-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-md);
+  align-items: center;
+}
+
+.sku-catalog-list {
+  margin-top: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.sku-catalog-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1.4fr 1fr auto;
+  gap: var(--space-md);
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: var(--border-default);
+  background: var(--surface-deep);
+}
+
+.sku-catalog-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.sku-catalog-title {
+  font-size: var(--font-md);
+  font-weight: 500;
+}
+
+.sku-catalog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+/* Форма модалки каталога: делаем ровную сетку для полей. */
+.sku-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.sku-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.sku-form-field--full {
+  grid-column: 1 / -1;
+}
+
+.sku-preview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: var(--border-info-soft);
+  background: var(--surface-info-soft);
+  color: var(--info-text);
+  margin-bottom: var(--space-sm);
+}
+
+.sku-preview-label {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.sku-active-row {
+  margin-top: var(--space-xs);
+}
+
+/* Отчёты: форма параметров и предпросмотр должны быть читаемыми. */
+.reports-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-md);
+  align-items: end;
+}
+
+.reports-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.reports-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.reports-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.reports-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-sm);
+}
+
+.reports-table th,
+.reports-table td {
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: var(--border-default);
+}
+
+.reports-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.reports-export {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  justify-content: flex-start;
+}
+
+/* Скрытый input для выбора файла: кнопка-пилюля запускает клик. */
+.file-input-hidden {
+  display: none;
+}
+
+/* Элементы только для мастера скрываем, пока режим не активен. */
+.master-only.master-only-hidden {
+  display: none;
+}
+
+.modal-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--info-text);
+  font-size: var(--font-lg);
+}
+
+.modal-input-wrap {
+  flex: 1;
+}
+
+.modal-hint {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.modal-actions--footer {
+  justify-content: flex-end;
+}
+
+.steps-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-xs);
+}
+
+.text-muted-sm {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.stats-note {
+  margin-top: var(--space-sm);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.scan-debug {
+  position: fixed;
+  left: var(--debug-offset-x);
+  bottom: var(--debug-offset-y);
+  font-size: var(--font-2xs);
+  color: var(--neutral-700);
+  opacity: 0.8;
+  pointer-events: none;
+  z-index: 9999;
+}
