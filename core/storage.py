@@ -83,6 +83,61 @@ def init_db():
     )
     """)
 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS pack_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sku TEXT NOT NULL,
+        start_time REAL NOT NULL,
+        end_time REAL,
+        state TEXT NOT NULL,
+        shift_id INTEGER,
+        worker_id TEXT,
+        phase TEXT,
+        current_step_index INTEGER,
+        total_steps INTEGER
+    )
+    """)
+
+    cur.execute("PRAGMA table_info(pack_sessions)")
+    pack_columns = [row["name"] for row in cur.fetchall()]
+    # Ниже — безопасная миграция: если база была создана ранее,
+    # мы добавляем недостающие колонки без изменения существующих данных.
+    # Это важно, чтобы не ломать рабочие станции при обновлении.
+    if "shift_id" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN shift_id INTEGER")
+    if "worker_id" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN worker_id TEXT")
+    if "phase" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN phase TEXT")
+    if "current_step_index" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN current_step_index INTEGER")
+    if "total_steps" not in pack_columns:
+        cur.execute("ALTER TABLE pack_sessions ADD COLUMN total_steps INTEGER")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS pack_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts REAL NOT NULL,
+        type TEXT NOT NULL,
+        payload_json TEXT,
+        session_id INTEGER NOT NULL,
+        sku TEXT
+    )
+    """)
+
+    # Таблица сменных заданий для упаковки.
+    # Мы сохраняем список SKU одной строкой JSON,
+    # чтобы не плодить дополнительные таблицы на раннем этапе.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS shift_plans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shift_id INTEGER NOT NULL,
+        created_at REAL NOT NULL,
+        name TEXT NOT NULL,
+        items_json TEXT NOT NULL
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -151,6 +206,189 @@ def add_event(
     conn.commit()
     conn.close()
     return int(event_id or 0)
+
+
+def create_pack_session(
+    sku: str,
+    ts: float,
+    state: str,
+    shift_id: int | None = None,
+    worker_id: str | None = None,
+    phase: str | None = None,
+    current_step_index: int | None = None,
+    total_steps: int | None = None,
+) -> int:
+    # Здесь мы сохраняем старт упаковки в БД.
+    # Важно фиксировать phase/current_step_index/total_steps сразу,
+    # чтобы UI мог корректно показывать прогресс даже после перезапуска сервиса.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO pack_sessions(
+               sku, start_time, end_time, state, shift_id, worker_id,
+               phase, current_step_index, total_steps
+           )
+           VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)""",
+        [sku, ts, state, shift_id, worker_id, phase, current_step_index, total_steps],
+    )
+    session_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(session_id or 0)
+
+
+def update_pack_session_state(session_id: int, state: str, end_time: float | None = None) -> None:
+    # Обновляет состояние FSM упаковки.
+    # end_time записываем только при TABLE_EMPTY, чтобы зафиксировать завершение SKU.
+    conn = get_conn()
+    cur = conn.cursor()
+    if end_time is None:
+        cur.execute(
+            """UPDATE pack_sessions
+               SET state=?
+               WHERE id=?""",
+            [state, session_id],
+        )
+    else:
+        cur.execute(
+            """UPDATE pack_sessions
+               SET state=?, end_time=?
+               WHERE id=?""",
+            [state, end_time, session_id],
+        )
+    conn.commit()
+    conn.close()
+
+
+def update_pack_session_progress(
+    session_id: int,
+    phase: str,
+    current_step_index: int,
+    total_steps: int,
+) -> None:
+    # Обновляет прогресс шагов.
+    # Это отдельная функция, чтобы логически отделить FSM-состояние от workflow-шагов.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE pack_sessions
+           SET phase=?, current_step_index=?, total_steps=?
+           WHERE id=?""",
+        [phase, current_step_index, total_steps, session_id],
+    )
+    conn.commit()
+    conn.close()
+
+
+def create_shift_plan(shift_id: int, name: str, created_at: float, items_json: str) -> int:
+    # Создаём сменное задание для активной смены.
+    # Храним список SKU в items_json, чтобы сохранять порядок и не терять данные.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO shift_plans(shift_id, created_at, name, items_json)
+           VALUES (?, ?, ?, ?)""",
+        [shift_id, created_at, name, items_json],
+    )
+    plan_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(plan_id or 0)
+
+
+def list_shift_plans(shift_id: int) -> list[sqlite3.Row]:
+    # Возвращаем все планы для указанной смены,
+    # чтобы UI мог показать оператору доступные варианты.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, name, created_at, items_json FROM shift_plans WHERE shift_id=? ORDER BY id DESC",
+        [shift_id],
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return list(rows or [])
+
+
+def get_shift_plan(plan_id: int) -> sqlite3.Row | None:
+    # Точный доступ к плану по ID нужен для выбора активного плана.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM shift_plans WHERE id=?", [plan_id])
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def get_active_shift_id() -> int:
+    # Ищем самую свежую активную смену.
+    # Это нужно, чтобы привязывать сменное задание к правильной смене.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id FROM worker_shifts WHERE is_active=1 ORDER BY start_time DESC LIMIT 1"
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return 0
+    return int(row["id"] or 0)
+
+
+def add_pack_event(
+    session_id: int,
+    event_type: str,
+    ts: float,
+    payload_json: str = "",
+    sku: str | None = None,
+) -> int:
+    # Сохраняем событие упаковки.
+    # payload_json хранит подробности шага или перехода, чтобы не менять схему БД.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO pack_events(ts, type, payload_json, session_id, sku)
+           VALUES (?, ?, ?, ?, ?)""",
+        [ts, event_type, payload_json or "", session_id, sku],
+    )
+    event_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(event_id or 0)
+
+
+def get_pack_session(session_id: int) -> sqlite3.Row | None:
+    # Точное чтение сессии по ID — используется в отладке и сервисных сценариях.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pack_sessions WHERE id=?", [session_id])
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def get_latest_pack_session() -> sqlite3.Row | None:
+    # Берём последнюю сессию по id, чтобы восстановить контекст после перезапуска.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pack_sessions ORDER BY id DESC LIMIT 1")
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def get_active_pack_session() -> sqlite3.Row | None:
+    # Активной считаем сессию в состояниях, где процесс ещё не завершён полностью.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT * FROM pack_sessions
+           WHERE state IN ('started', 'box_closed')
+           ORDER BY id DESC LIMIT 1"""
+    )
+    row = cur.fetchone()
+    conn.close()
+    return row
 
 
 def start_worker_shift(worker_id: str, work_center: str) -> int:
