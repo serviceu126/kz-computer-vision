@@ -1,20 +1,33 @@
 from pathlib import Path
 from typing import List, Optional, Literal
+import re
 import json
 import time
+import sqlite3
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.logic import engine, KioskUIState
 from core.storage import (
+    add_event,
     get_conn,
     create_shift_plan,
     get_active_shift_id,
     get_shift_plan,
     list_shift_plans,
+    get_kiosk_setting,
+    get_kiosk_settings,
+    set_kiosk_setting,
+    get_master_session,
+    set_master_session,
+    clear_master_session,
+    update_master_last_active,
+    list_sku_catalog,
+    create_sku_catalog_item,
+    update_sku_catalog_item,
 )
 from services.packaging import (
     advance_phase,
@@ -110,6 +123,11 @@ class KioskState(BaseModel):
     camera_stream_url: str="http://127.0.0.1:8080/stream"
     overlay_slots: List[OverlaySlot]
 
+    # Режим мастера (супервайзер).
+    # Нужен только для UI, чтобы подсветить, кто имеет право на ручные действия.
+    master_mode: bool = False
+    master_id: Optional[str] = None
+
 
 class StartSessionRequest(BaseModel):
     worker_id: Optional[str] = None
@@ -162,6 +180,88 @@ class ShiftPlanSelectRequest(BaseModel):
     plan_id: int
 
 
+class MasterLoginRequest(BaseModel):
+    qr_text: str
+
+
+class KioskSettingsRequest(BaseModel):
+    operator_can_reorder: Optional[bool] = None
+    operator_can_edit_qty: Optional[bool] = None
+    operator_can_add_sku_to_shift: Optional[bool] = None
+    operator_can_remove_sku_from_shift: Optional[bool] = None
+    operator_can_manual_mode: Optional[bool] = None
+    master_session_timeout_min: Optional[int] = None
+
+
+class MasterLogoutRequest(BaseModel):
+    reason: Optional[str] = "manual"
+
+
+class SkuCreateRequest(BaseModel):
+    sku_code: str
+    name: str
+    model_code: str
+    width_cm: int
+    fabric_code: str
+    color_code: str
+    is_active: Optional[bool] = True
+
+
+class SkuUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+def update_master_activity():
+    # Фиксируем время последнего действия мастера в базе.
+    # Так таймаут считается устойчиво, даже после перезапуска сервиса.
+    update_master_last_active(int(time.time()))
+
+
+def ensure_master_session_alive():
+    """
+    Проверяем, истёк ли таймаут мастер-сессии.
+
+    Почему делаем это на уровне API:
+    - фронт регулярно опрашивает /api/kiosk/state;
+    - так мы автоматически выключаем режим при бездействии,
+      даже если оператор ничего не нажимал.
+    """
+    session = get_master_session()
+    if not session.get("enabled"):
+        return
+    timeout_min = get_kiosk_setting("master_session_timeout_min", 15)
+    timeout_min = max(1, min(int(timeout_min or 15), 240))
+    last_activity = session.get("last_active_ts") or 0
+    if (time.time() - last_activity) > (timeout_min * 60):
+        master_id = session.get("master_id")
+        if master_id:
+            add_event(
+                event_type="master_logout",
+                ts=time.time(),
+                payload_json=json.dumps(
+                    {"master_id": master_id, "reason": "timeout"},
+                    ensure_ascii=False,
+                ),
+                shift_id=get_active_shift_id(),
+            )
+        clear_master_session()
+
+
+def ensure_master_mode() -> dict:
+    """
+    Проверяем, что мастер-режим активен.
+
+    Это единая точка контроля, чтобы не дублировать проверки
+    по всем endpoint-ам каталога.
+    """
+    ensure_master_session_alive()
+    session = get_master_session()
+    if not session.get("enabled"):
+        raise HTTPException(status_code=403, detail="Доступно только в мастер-режиме.")
+    return session
+
+
 app = FastAPI(title="KZ Kiosk API")
 
 app.mount(
@@ -178,7 +278,10 @@ async def root():
 
 @app.get("/api/kiosk/state", response_model=KioskState)
 async def get_state():
+    ensure_master_session_alive()
     ui: KioskUIState = engine.get_ui_state()
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
     return KioskState(
         worker_name=ui.worker_name,
         shift_label=ui.shift_label,
@@ -239,7 +342,62 @@ async def get_state():
             )
             for o in ui.overlay_slots
         ],
+        master_mode=bool(master_id),
+        master_id=master_id,
     )
+
+
+@app.post("/api/kiosk/master/login")
+async def master_login(payload: MasterLoginRequest):
+    """
+    Вход в режим мастера по QR-коду.
+
+    Формат:
+    - буква M и 8 цифр (например, M13540876).
+    Почему так:
+    - формат легко распознаётся сканером;
+    - мы быстро валидируем его без внешних сервисов.
+    """
+    qr_text = (payload.qr_text or "").strip()
+    match = re.fullmatch(r"M(\d{8})", qr_text)
+    if not match:
+        raise HTTPException(
+            status_code=400,
+            detail="Неверный QR мастера. Ожидается формат M######## (например, M13540876).",
+        )
+    master_id = match.group(1)
+    set_master_session(master_id=master_id, last_active_ts=int(time.time()))
+    add_event(
+        event_type="master_login",
+        ts=time.time(),
+        payload_json=json.dumps({"master_id": master_id}, ensure_ascii=False),
+        shift_id=get_active_shift_id(),
+    )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/session/start")
@@ -462,6 +620,14 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
     if not shift_id:
         raise HTTPException(status_code=409, detail="Нет активной смены для загрузки плана.")
 
+    # Проверяем право редактирования количества/очереди.
+    # Если мастер запретил редактирование, оператор не должен менять список.
+    if get_kiosk_setting("operator_can_edit_qty", 1) == 0:
+        raise HTTPException(
+            status_code=403,
+            detail="Редактирование списка запрещено настройками мастера.",
+        )
+
     raw_items: List[str] = []
     if payload.items:
         raw_items = payload.items
@@ -544,6 +710,177 @@ async def pack_plan_select(payload: ShiftPlanSelectRequest):
             "items": items,
         },
     }
+
+
+@app.get("/api/kiosk/settings")
+async def get_kiosk_settings_api():
+    """
+    Возвращает настройки киоска.
+
+    Мы отдаём фиксированный набор ключей,
+    чтобы UI мог стабильно строить интерфейс.
+    """
+    ensure_master_session_alive()
+    settings = get_kiosk_settings(
+        [
+            "operator_can_reorder",
+            "operator_can_edit_qty",
+            "operator_can_add_sku_to_shift",
+            "operator_can_remove_sku_from_shift",
+            "operator_can_manual_mode",
+            "master_session_timeout_min",
+        ]
+    )
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    return {
+        "status": "ok",
+        "settings": {
+            "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
+            "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
+            "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
+            "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
+            "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
+            "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
+        },
+        "master_mode": bool(master_id),
+        "master_id": master_id,
+    }
+
+
+@app.post("/api/kiosk/settings")
+async def set_kiosk_settings_api(payload: KioskSettingsRequest):
+    """
+    Сохраняет настройки киоска.
+
+    Важно:
+    - менять настройки может только мастер (QR уже отсканирован);
+    - изменения сразу сохраняются в SQLite и переживают перезапуск сервиса.
+    """
+    ensure_master_session_alive()
+    session = get_master_session()
+    if not session.get("enabled"):
+        raise HTTPException(status_code=403, detail="Настройки доступны только мастеру.")
+
+    changed_keys: list[str] = []
+    if payload.operator_can_reorder is not None:
+        set_kiosk_setting("operator_can_reorder", int(payload.operator_can_reorder))
+        changed_keys.append("operator_can_reorder")
+    if payload.operator_can_edit_qty is not None:
+        set_kiosk_setting("operator_can_edit_qty", int(payload.operator_can_edit_qty))
+        changed_keys.append("operator_can_edit_qty")
+    if payload.operator_can_add_sku_to_shift is not None:
+        set_kiosk_setting(
+            "operator_can_add_sku_to_shift", int(payload.operator_can_add_sku_to_shift)
+        )
+        changed_keys.append("operator_can_add_sku_to_shift")
+    if payload.operator_can_remove_sku_from_shift is not None:
+        set_kiosk_setting(
+            "operator_can_remove_sku_from_shift", int(payload.operator_can_remove_sku_from_shift)
+        )
+        changed_keys.append("operator_can_remove_sku_from_shift")
+    if payload.operator_can_manual_mode is not None:
+        set_kiosk_setting("operator_can_manual_mode", int(payload.operator_can_manual_mode))
+        changed_keys.append("operator_can_manual_mode")
+    if payload.master_session_timeout_min is not None:
+        timeout = int(payload.master_session_timeout_min)
+        if timeout < 1 or timeout > 240:
+            raise HTTPException(
+                status_code=400,
+                detail="Таймаут мастера должен быть в диапазоне 1..240 минут.",
+            )
+        set_kiosk_setting("master_session_timeout_min", timeout)
+        changed_keys.append("master_session_timeout_min")
+
+    update_master_activity()
+    if changed_keys:
+        add_event(
+            event_type="settings_change",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": session.get("master_id"), "keys": changed_keys},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    settings = get_kiosk_settings(
+        [
+            "operator_can_reorder",
+            "operator_can_edit_qty",
+            "operator_can_add_sku_to_shift",
+            "operator_can_remove_sku_from_shift",
+            "operator_can_manual_mode",
+            "master_session_timeout_min",
+        ]
+    )
+    return {
+        "status": "ok",
+        "settings": {
+            "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
+            "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
+            "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
+            "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
+            "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
+            "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
+        },
+        "master_mode": True,
+        "master_id": session.get("master_id"),
+    }
+
+
+@app.get("/api/kiosk/sku")
+async def sku_list(
+    q: Optional[str] = Query(None, description="Поиск по SKU/названию/модели"),
+    include_inactive: bool = Query(False, description="Показывать неактивные SKU"),
+):
+    """
+    Возвращает список SKU из каталога.
+
+    По умолчанию отдаём только активные позиции,
+    чтобы UI не захламлялся архивом.
+    """
+    ensure_master_mode()
+    items = list_sku_catalog(search=q, include_inactive=include_inactive)
+    return {"status": "ok", "items": items}
+
+
+@app.post("/api/kiosk/sku")
+async def sku_create(payload: SkuCreateRequest):
+    """
+    Создаёт SKU в каталоге (только мастер).
+    """
+    ensure_master_mode()
+    sku_code = payload.sku_code.strip()
+    name = payload.name.strip()
+    if not sku_code or not name:
+        raise HTTPException(status_code=400, detail="SKU и имя не должны быть пустыми.")
+    try:
+        sku_id = create_sku_catalog_item(
+            sku_code=sku_code,
+            name=name,
+            model_code=payload.model_code.strip(),
+            width_cm=int(payload.width_cm),
+            fabric_code=payload.fabric_code.strip(),
+            color_code=payload.color_code.strip(),
+            is_active=1 if payload.is_active else 0,
+        )
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.")
+    return {"status": "ok", "id": sku_id}
+
+
+@app.put("/api/kiosk/sku/{sku_id}")
+async def sku_update(sku_id: int, payload: SkuUpdateRequest):
+    """
+    Редактирует SKU (только имя и активность), только мастер.
+    """
+    ensure_master_mode()
+    update_sku_catalog_item(
+        sku_id=sku_id,
+        name=payload.name.strip() if payload.name is not None else None,
+        is_active=1 if payload.is_active else (0 if payload.is_active is False else None),
+    )
+    return {"status": "ok"}
 
 
 @app.get("/api/kiosk/pack/plan")

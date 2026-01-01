@@ -138,6 +138,302 @@ def init_db():
     )
     """)
 
+    # Таблица настроек киоска.
+    # Храним простые флаги (0/1), чтобы быстро управлять правами оператора.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS kiosk_settings (
+        key TEXT PRIMARY KEY,
+        value INTEGER NOT NULL
+    )
+    """)
+
+    # Таблица мастер-сессии киоска.
+    # Держим одну строку (id=1), чтобы хранить master_id и таймштамп активности.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS kiosk_master_session (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        master_id TEXT,
+        last_active_ts INTEGER,
+        enabled INTEGER NOT NULL
+    )
+    """)
+
+    # Дефолтные настройки киоска: если записей нет, добавляем их.
+    # Это нужно, чтобы UI всегда получал ожидаемые значения.
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_reorder", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_edit_qty", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_add_sku_to_shift", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_remove_sku_from_shift", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_manual_mode", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["master_session_timeout_min", 15],
+    )
+
+    # Таблица каталога SKU для мастер-режима.
+    # Она нужна для базового справочника, который мастер пополняет вручную.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS sku_catalog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sku_code TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        model_code TEXT NOT NULL,
+        width_cm INTEGER NOT NULL,
+        fabric_code TEXT NOT NULL,
+        color_code TEXT NOT NULL,
+        is_active INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )
+    """)
+
+    # Создаём дефолтную строку мастер-сессии.
+    # Это упрощает обновления: всегда есть одна запись id=1.
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_master_session(id, master_id, last_active_ts, enabled) "
+        "VALUES (1, NULL, NULL, 0)"
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def get_kiosk_setting(key: str, default: int = 0) -> int:
+    # Читаем настройку по ключу.
+    # Если записи нет, возвращаем безопасный дефолт.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM kiosk_settings WHERE key=?", [key])
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return int(default)
+    return int(row["value"] or 0)
+
+
+def set_kiosk_setting(key: str, value: int) -> None:
+    # Записываем настройку (0/1) по ключу.
+    # Используем INSERT OR REPLACE, чтобы обновлять без сложных проверок.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT OR REPLACE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        [key, int(value)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_kiosk_settings(keys: list[str]) -> dict[str, int]:
+    # Массовое чтение настроек.
+    # Это ускоряет UI-запросы и упрощает обработку.
+    conn = get_conn()
+    cur = conn.cursor()
+    placeholders = ",".join("?" for _ in keys)
+    cur.execute(
+        f"SELECT key, value FROM kiosk_settings WHERE key IN ({placeholders})",
+        keys,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return {row["key"]: int(row["value"] or 0) for row in (rows or [])}
+
+
+def get_master_session() -> dict[str, int | str | None]:
+    """
+    Читает текущую мастер-сессию из БД.
+
+    Возвращаем словарь с полями:
+    - enabled: 0/1
+    - master_id: строка или None
+    - last_active_ts: unix time (int) или None
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT master_id, last_active_ts, enabled FROM kiosk_master_session WHERE id=1"
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return {"enabled": 0, "master_id": None, "last_active_ts": None}
+    return {
+        "enabled": int(row["enabled"] or 0),
+        "master_id": row["master_id"],
+        "last_active_ts": row["last_active_ts"],
+    }
+
+
+def set_master_session(master_id: str, last_active_ts: int) -> None:
+    """
+    Включает мастер-режим и фиксирует активность.
+
+    Мы пишем всегда в строку id=1, чтобы не усложнять логику.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE kiosk_master_session
+           SET master_id=?, last_active_ts=?, enabled=1
+           WHERE id=1""",
+        [master_id, int(last_active_ts)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def clear_master_session() -> None:
+    """
+    Отключает мастер-режим.
+
+    Мы очищаем master_id и таймштамп, чтобы UI видел пустое состояние.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE kiosk_master_session
+           SET master_id=NULL, last_active_ts=NULL, enabled=0
+           WHERE id=1"""
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_master_last_active(last_active_ts: int) -> None:
+    """
+    Обновляет время последней активности мастера.
+
+    Этот метод вызываем при любых мастер-действиях,
+    чтобы таймаут отсчитывался корректно.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE kiosk_master_session
+           SET last_active_ts=?
+           WHERE id=1 AND enabled=1""",
+        [int(last_active_ts)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_sku_catalog(search: str | None = None, include_inactive: bool = False) -> list[dict]:
+    """
+    Возвращает список SKU из каталога.
+
+    По умолчанию показываем только активные позиции,
+    чтобы оператор не видел архивные записи.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    params: list = []
+    where = []
+    if not include_inactive:
+        where.append("is_active = 1")
+    if search:
+        where.append("(sku_code LIKE ? OR name LIKE ? OR model_code LIKE ?)")
+        needle = f"%{search.strip()}%"
+        params.extend([needle, needle, needle])
+    where_sql = " WHERE " + " AND ".join(where) if where else ""
+    cur.execute(
+        f"""SELECT id, sku_code, name, model_code, width_cm, fabric_code, color_code,
+                is_active, created_at, updated_at
+           FROM sku_catalog
+           {where_sql}
+           ORDER BY updated_at DESC, id DESC""",
+        params,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(row) for row in (rows or [])]
+
+
+def create_sku_catalog_item(
+    sku_code: str,
+    name: str,
+    model_code: str,
+    width_cm: int,
+    fabric_code: str,
+    color_code: str,
+    is_active: int = 1,
+) -> int:
+    """
+    Создаёт новую запись SKU в каталоге.
+
+    Мы пишем timestamps в секундах, чтобы можно было сортировать и фильтровать.
+    """
+    ts = int(time.time())
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO sku_catalog(
+               sku_code, name, model_code, width_cm, fabric_code, color_code,
+               is_active, created_at, updated_at
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            sku_code,
+            name,
+            model_code,
+            int(width_cm),
+            fabric_code,
+            color_code,
+            int(is_active),
+            ts,
+            ts,
+        ],
+    )
+    sku_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(sku_id or 0)
+
+
+def update_sku_catalog_item(
+    sku_id: int,
+    name: str | None = None,
+    is_active: int | None = None,
+) -> None:
+    """
+    Обновляет поля name / is_active у SKU.
+
+    Другие поля не трогаем, чтобы не ломать код SKU.
+    """
+    fields = []
+    params: list = []
+    if name is not None:
+        fields.append("name=?")
+        params.append(name)
+    if is_active is not None:
+        fields.append("is_active=?")
+        params.append(int(is_active))
+    if not fields:
+        return
+    fields.append("updated_at=?")
+    params.append(int(time.time()))
+    params.append(int(sku_id))
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        f"UPDATE sku_catalog SET {', '.join(fields)} WHERE id=?",
+        params,
+    )
     conn.commit()
     conn.close()
 
