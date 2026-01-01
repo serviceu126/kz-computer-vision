@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from core.logic import engine, KioskUIState
 from core.storage import (
+    add_event,
     get_conn,
     create_shift_plan,
     get_active_shift_id,
@@ -19,6 +20,10 @@ from core.storage import (
     get_kiosk_setting,
     get_kiosk_settings,
     set_kiosk_setting,
+    get_master_session,
+    set_master_session,
+    clear_master_session,
+    update_master_last_active,
 )
 from services.packaging import (
     advance_phase,
@@ -185,28 +190,10 @@ class MasterLogoutRequest(BaseModel):
     reason: Optional[str] = "manual"
 
 
-# Храним ID мастера в памяти сервиса.
-# Это простой и прозрачный подход: UI не зависит от базы, а состояние
-# сбрасывается при перезапуске сервиса, что безопасно для доступа.
-MASTER_STATE = {
-    "id": None,
-    "last_activity_ts": None,
-    "last_logout_reason": None,
-}
-
-
 def update_master_activity():
-    # Фиксируем время последнего действия мастера.
-    # Это нужно, чтобы корректно считать таймаут бездействия.
-    MASTER_STATE["last_activity_ts"] = time.time()
-
-
-def clear_master_session(reason: str):
-    # Сбрасываем мастер-сессию с указанием причины.
-    # Причина полезна для журналирования и отладки.
-    MASTER_STATE["id"] = None
-    MASTER_STATE["last_activity_ts"] = None
-    MASTER_STATE["last_logout_reason"] = reason
+    # Фиксируем время последнего действия мастера в базе.
+    # Так таймаут считается устойчиво, даже после перезапуска сервиса.
+    update_master_last_active(int(time.time()))
 
 
 def ensure_master_session_alive():
@@ -218,14 +205,25 @@ def ensure_master_session_alive():
     - так мы автоматически выключаем режим при бездействии,
       даже если оператор ничего не нажимал.
     """
-    master_id = MASTER_STATE["id"]
-    if not master_id:
+    session = get_master_session()
+    if not session.get("enabled"):
         return
     timeout_min = get_kiosk_setting("master_session_timeout_min", 15)
     timeout_min = max(1, min(int(timeout_min or 15), 240))
-    last_activity = MASTER_STATE["last_activity_ts"] or 0
+    last_activity = session.get("last_active_ts") or 0
     if (time.time() - last_activity) > (timeout_min * 60):
-        clear_master_session("timeout")
+        master_id = session.get("master_id")
+        if master_id:
+            add_event(
+                event_type="master_logout",
+                ts=time.time(),
+                payload_json=json.dumps(
+                    {"master_id": master_id, "reason": "timeout"},
+                    ensure_ascii=False,
+                ),
+                shift_id=get_active_shift_id(),
+            )
+        clear_master_session()
 
 
 app = FastAPI(title="KZ Kiosk API")
@@ -246,7 +244,8 @@ async def root():
 async def get_state():
     ensure_master_session_alive()
     ui: KioskUIState = engine.get_ui_state()
-    master_id = MASTER_STATE["id"]
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
     return KioskState(
         worker_name=ui.worker_name,
         shift_label=ui.shift_label,
@@ -310,6 +309,59 @@ async def get_state():
         master_mode=bool(master_id),
         master_id=master_id,
     )
+
+
+@app.post("/api/kiosk/master/login")
+async def master_login(payload: MasterLoginRequest):
+    """
+    Вход в режим мастера по QR-коду.
+
+    Формат:
+    - буква M и 8 цифр (например, M13540876).
+    Почему так:
+    - формат легко распознаётся сканером;
+    - мы быстро валидируем его без внешних сервисов.
+    """
+    qr_text = (payload.qr_text or "").strip()
+    match = re.fullmatch(r"M(\d{8})", qr_text)
+    if not match:
+        raise HTTPException(
+            status_code=400,
+            detail="Неверный QR мастера. Ожидается формат M######## (например, M13540876).",
+        )
+    master_id = match.group(1)
+    set_master_session(master_id=master_id, last_active_ts=int(time.time()))
+    add_event(
+        event_type="master_login",
+        ts=time.time(),
+        payload_json=json.dumps({"master_id": master_id}, ensure_ascii=False),
+        shift_id=get_active_shift_id(),
+    )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/master/login")
@@ -669,6 +721,8 @@ async def get_kiosk_settings_api():
     settings = get_kiosk_settings(
         ["operator_can_reorder", "operator_can_edit_qty", "master_session_timeout_min"]
     )
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
     return {
         "status": "ok",
         "settings": {
@@ -676,6 +730,8 @@ async def get_kiosk_settings_api():
             "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
             "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
         },
+        "master_mode": bool(master_id),
+        "master_id": master_id,
     }
 
 
@@ -689,13 +745,17 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
     - изменения сразу сохраняются в SQLite и переживают перезапуск сервиса.
     """
     ensure_master_session_alive()
-    if not MASTER_STATE["id"]:
+    session = get_master_session()
+    if not session.get("enabled"):
         raise HTTPException(status_code=403, detail="Настройки доступны только мастеру.")
 
+    changed_keys: list[str] = []
     if payload.operator_can_reorder is not None:
         set_kiosk_setting("operator_can_reorder", int(payload.operator_can_reorder))
+        changed_keys.append("operator_can_reorder")
     if payload.operator_can_edit_qty is not None:
         set_kiosk_setting("operator_can_edit_qty", int(payload.operator_can_edit_qty))
+        changed_keys.append("operator_can_edit_qty")
     if payload.master_session_timeout_min is not None:
         timeout = int(payload.master_session_timeout_min)
         if timeout < 1 or timeout > 240:
@@ -704,8 +764,19 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
                 detail="Таймаут мастера должен быть в диапазоне 1..240 минут.",
             )
         set_kiosk_setting("master_session_timeout_min", timeout)
+        changed_keys.append("master_session_timeout_min")
 
     update_master_activity()
+    if changed_keys:
+        add_event(
+            event_type="settings_change",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": session.get("master_id"), "keys": changed_keys},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
     settings = get_kiosk_settings(
         ["operator_can_reorder", "operator_can_edit_qty", "master_session_timeout_min"]
     )
@@ -716,6 +787,8 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
             "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
             "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
         },
+        "master_mode": True,
+        "master_id": session.get("master_id"),
     }
 
 
