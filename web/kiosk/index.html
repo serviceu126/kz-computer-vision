@@ -193,6 +193,7 @@
     .panel-body {
       position: relative;
       z-index: 1;
+      margin-bottom: var(--space-sm);
     }
 
     .panel-title {
@@ -936,7 +937,7 @@
       overflow: auto;
     }
 
-    .shift-plan-row {
+    .shift-plan-catalog-list {
       display: grid;
       grid-template-columns: 1fr auto auto auto auto auto;
       gap: var(--space-xs);
@@ -1560,6 +1561,24 @@
               Отчёты обновляются автоматически при поступлении данных.
             </div>
           </div>
+          <div class="panel-body">
+            <div class="stats-row">
+              <span class="stats-label">Активные смены</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Лучшая выработка</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Средняя выработка</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-note">
+              Отчёты обновляются автоматически при поступлении данных.
+            </div>
+          </div>
+          <div class="steps-list" id="stepsList"></div>
         </div>
       </div>
     </div>
