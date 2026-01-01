@@ -1,0 +1,32 @@
+--- a/web/kiosk/index.html
++++ b/web/kiosk/index.html
+@@ -1374,8 +1374,6 @@
+             </div>
+           </div>
+         </div>
+-      </div>
+-    </div>
+ 
+         <!-- Низ: события и статистика по текущей кровати. -->
+         <div class="bottom">
+--- a/web/kiosk/kiosk.js
++++ b/web/kiosk/kiosk.js
+@@ -244,9 +244,7 @@
+       if (data && data.settings) {
+         applySettingsToUi(data.settings);
+       }
+-      if (data && data.master_mode && data.master_id) {
+-        setMasterUi(data.master_id);
+-      }
++      setMasterUi((data && data.master_mode) ? (data.master_id || null) : null);
+     } catch (error) {
+       // Молча игнорируем сетевые ошибки, чтобы не мешать оператору.
+     }
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -77,3 +77,5 @@
+ uvloop==0.22.1
+ watchfiles==1.1.1
+ websockets==15.0.1
++python-multipart
++openpyxl
