@@ -1486,19 +1486,27 @@
                 <span>Настройки</span>
               </div>
             </div>
-            <div class="settings-row">
-              <input id="settingCanReorder" type="checkbox" />
-              <label for="settingCanReorder">Оператор может менять порядок очереди</label>
+            <!-- Группируем настройки по смыслу, чтобы оператор читал сверху вниз. -->
+            <div class="settings-section">
+              <div class="settings-section-title">Права оператора</div>
+              <div class="settings-row">
+                <input id="settingCanReorder" type="checkbox" />
+                <label for="settingCanReorder">Оператор может менять порядок очереди</label>
+              </div>
+              <div class="settings-row">
+                <input id="settingCanEditQty" type="checkbox" />
+                <label for="settingCanEditQty">Оператор может менять количество SKU</label>
+              </div>
             </div>
-            <div class="settings-row">
-              <input id="settingCanEditQty" type="checkbox" />
-              <label for="settingCanEditQty">Оператор может менять количество SKU</label>
+            <div class="settings-section">
+              <div class="settings-section-title">Мастер-режим</div>
+              <div class="settings-field">
+                <label for="settingMasterTimeout" class="settings-label">Таймаут мастера (мин)</label>
+                <input id="settingMasterTimeout" class="settings-input" type="number" min="1" max="240" value="15" />
+              </div>
             </div>
-            <div class="settings-row">
-              <label for="settingMasterTimeout" class="settings-label">Таймаут мастера (мин)</label>
-              <input id="settingMasterTimeout" class="settings-input" type="number" min="1" max="240" value="15" />
-            </div>
-            <div class="pill-row pill-row--start">
+            <!-- Кнопки действий держим внизу и справа, чтобы они не мешали чтению. -->
+            <div class="settings-actions">
               <div id="btnSettingsSave" class="pill-btn" role="button" tabindex="0">
                 <span class="dot"></span>
                 <span>Сохранить настройки</span>

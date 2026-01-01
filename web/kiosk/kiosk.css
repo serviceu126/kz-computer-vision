@@ -163,6 +163,49 @@
   min-width: var(--size-settings-label);
 }
 
+/* Структура блока "Управление / Настройки": делаем ясные секции и отступы. */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+.settings-section:first-of-type {
+  margin-top: var(--space-md);
+}
+
+.settings-section-title {
+  font-size: var(--font-sm);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Каждый чекбокс в отдельной строке, чтобы удобно читать с расстояния. */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* Строка для числового поля таймаута: подпись и поле выровнены. */
+.settings-field {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(140px, 1fr);
+  align-items: center;
+  gap: var(--space-md);
+}
+
+/* Кнопки действий фиксируем внизу и выравниваем вправо. */
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-md);
+  margin-top: var(--space-lg);
+  flex-wrap: wrap;
+}
+
 .modal-input {
   width: 100%;
   background: transparent;

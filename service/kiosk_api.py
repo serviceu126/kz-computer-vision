@@ -364,39 +364,6 @@ async def master_logout(payload: MasterLogoutRequest):
     return {"status": "ok", "reason": reason}
 
 
-@app.post("/api/kiosk/master/login")
-async def master_login(payload: MasterLoginRequest):
-    """
-    Вход в режим мастера по QR-коду.
-
-    Формат:
-    - буква M и 8 цифр (например, M13540876).
-    Почему так:
-    - формат легко распознаётся сканером;
-    - мы быстро валидируем его без внешних сервисов.
-    """
-    qr_text = (payload.qr_text or "").strip()
-    if not re.fullmatch(r"M\d{8}", qr_text):
-        raise HTTPException(
-            status_code=400,
-            detail="Неверный QR мастера. Ожидается формат M######## (например, M13540876).",
-        )
-    MASTER_STATE["id"] = qr_text
-    update_master_activity()
-    return {"status": "ok", "master_id": qr_text}
-
-
-@app.post("/api/kiosk/master/logout")
-async def master_logout(payload: MasterLogoutRequest):
-    """
-    Выход из режима мастера.
-
-    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
-    """
-    clear_master_session(payload.reason or "manual")
-    return {"status": "ok", "reason": payload.reason or "manual"}
-
-
 @app.post("/api/kiosk/session/start")
 async def start_session(payload: StartSessionRequest):
     worker_id = payload.worker_id or ""
