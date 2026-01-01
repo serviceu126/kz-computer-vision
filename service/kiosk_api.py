@@ -16,6 +16,9 @@ from core.storage import (
     get_active_shift_id,
     get_shift_plan,
     list_shift_plans,
+    get_kiosk_setting,
+    get_kiosk_settings,
+    set_kiosk_setting,
 )
 from services.packaging import (
     advance_phase,
@@ -170,6 +173,11 @@ class ShiftPlanSelectRequest(BaseModel):
 
 class MasterLoginRequest(BaseModel):
     qr_text: str
+
+
+class KioskSettingsRequest(BaseModel):
+    operator_can_reorder: Optional[bool] = None
+    operator_can_edit_qty: Optional[bool] = None
 
 
 # Храним ID мастера в памяти сервиса.
@@ -513,6 +521,14 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
     if not shift_id:
         raise HTTPException(status_code=409, detail="Нет активной смены для загрузки плана.")
 
+    # Проверяем право редактирования количества/очереди.
+    # Если мастер запретил редактирование, оператор не должен менять список.
+    if get_kiosk_setting("operator_can_edit_qty", 1) == 0:
+        raise HTTPException(
+            status_code=403,
+            detail="Редактирование списка запрещено настройками мастера.",
+        )
+
     raw_items: List[str] = []
     if payload.items:
         raw_items = payload.items
@@ -593,6 +609,51 @@ async def pack_plan_select(payload: ShiftPlanSelectRequest):
             "name": row["name"],
             "count": len(items),
             "items": items,
+        },
+    }
+
+
+@app.get("/api/kiosk/settings")
+async def get_kiosk_settings_api():
+    """
+    Возвращает настройки киоска.
+
+    Мы отдаём фиксированный набор ключей,
+    чтобы UI мог стабильно строить интерфейс.
+    """
+    settings = get_kiosk_settings(["operator_can_reorder", "operator_can_edit_qty"])
+    return {
+        "status": "ok",
+        "settings": {
+            "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
+            "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
+        },
+    }
+
+
+@app.post("/api/kiosk/settings")
+async def set_kiosk_settings_api(payload: KioskSettingsRequest):
+    """
+    Сохраняет настройки киоска.
+
+    Важно:
+    - менять настройки может только мастер (QR уже отсканирован);
+    - изменения сразу сохраняются в SQLite и переживают перезапуск сервиса.
+    """
+    if not MASTER_STATE["id"]:
+        raise HTTPException(status_code=403, detail="Настройки доступны только мастеру.")
+
+    if payload.operator_can_reorder is not None:
+        set_kiosk_setting("operator_can_reorder", int(payload.operator_can_reorder))
+    if payload.operator_can_edit_qty is not None:
+        set_kiosk_setting("operator_can_edit_qty", int(payload.operator_can_edit_qty))
+
+    settings = get_kiosk_settings(["operator_can_reorder", "operator_can_edit_qty"])
+    return {
+        "status": "ok",
+        "settings": {
+            "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
+            "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
         },
     }
 

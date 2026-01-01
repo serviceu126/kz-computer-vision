@@ -3,6 +3,7 @@
 (() => {
   const API_MASTER_LOGIN_URL = "/api/kiosk/master/login";
   const API_MASTER_LOGOUT_URL = "/api/kiosk/master/logout";
+  const API_SETTINGS_URL = "/api/kiosk/settings";
 
   // UI-элементы мастера: кнопки, модалка, статус.
   const btnMasterLogin = document.getElementById("btnMasterLogin");
@@ -15,7 +16,13 @@
   const masterLoginActions = document.getElementById("masterLoginActions");
   const masterLoginCancel = document.getElementById("masterLoginCancel");
 
+  // Чекбоксы настроек.
+  const settingCanReorder = document.getElementById("settingCanReorder");
+  const settingCanEditQty = document.getElementById("settingCanEditQty");
+  const settingsHint = document.getElementById("settingsHint");
+
   let masterModalOpen = false;
+  let currentMasterId = null;
 
   function setMasterUi(masterId) {
     /**
@@ -31,6 +38,105 @@
     }
     if (btnMasterLogout) {
       btnMasterLogout.classList.toggle("master-hidden", !masterId);
+    }
+    currentMasterId = masterId || null;
+    updateSettingsAvailability();
+  }
+
+  function updateSettingsAvailability() {
+    /**
+     * Блокируем/разблокируем чекбоксы настроек.
+     *
+     * Логика простая:
+     * - если мастер не вошёл, менять права нельзя;
+     * - UI остаётся читаемым, но с подсказкой, почему он заблокирован.
+     */
+    const enabled = !!currentMasterId;
+    if (settingCanReorder) {
+      settingCanReorder.disabled = !enabled;
+    }
+    if (settingCanEditQty) {
+      settingCanEditQty.disabled = !enabled;
+    }
+    if (settingsHint) {
+      settingsHint.textContent = enabled
+        ? "Изменения применяются сразу и сохраняются в базе."
+        : "Настройки доступны только мастеру. Перед изменением войдите как мастер.";
+    }
+  }
+
+  function applySettingsToUi(settings) {
+    /**
+     * Синхронизируем чекбоксы с настройками backend.
+     *
+     * Зачем:
+     * - UI показывает реальные права оператора;
+     * - любые изменения подтягиваются даже после перезагрузки.
+     */
+    if (settingCanReorder) {
+      settingCanReorder.checked = !!settings.operator_can_reorder;
+    }
+    if (settingCanEditQty) {
+      settingCanEditQty.checked = !!settings.operator_can_edit_qty;
+    }
+    if (window.applyOperatorSettings) {
+      window.applyOperatorSettings({
+        operator_can_reorder: !!settings.operator_can_reorder,
+        operator_can_edit_qty: !!settings.operator_can_edit_qty,
+      });
+    }
+  }
+
+  async function fetchSettings() {
+    /**
+     * Загружаем настройки из backend.
+     *
+     * Важно: не кидаем исключения наружу, чтобы UI не ломался при сетевых сбоях.
+     */
+    try {
+      const resp = await fetch(API_SETTINGS_URL, { cache: "no-store" });
+      if (!resp.ok) {
+        return;
+      }
+      const data = await resp.json();
+      if (data && data.settings) {
+        applySettingsToUi(data.settings);
+      }
+    } catch (error) {
+      // Молча игнорируем сетевые ошибки, чтобы не мешать оператору.
+    }
+  }
+
+  async function saveSettings() {
+    /**
+     * Отправляем текущие настройки на backend.
+     *
+     * Если backend вернул ошибку, возвращаем прежние значения,
+     * чтобы UI не показывал неверное состояние.
+     */
+    const payload = {
+      operator_can_reorder: !!settingCanReorder?.checked,
+      operator_can_edit_qty: !!settingCanEditQty?.checked,
+    };
+    try {
+      const resp = await fetch(API_SETTINGS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({}));
+        window.showPackToast?.(detail.detail || "Не удалось сохранить настройки.");
+        await fetchSettings();
+        return;
+      }
+      const data = await resp.json();
+      if (data && data.settings) {
+        applySettingsToUi(data.settings);
+      }
+    } catch (error) {
+      window.showPackToast?.("Ошибка сети: настройки не сохранены.");
+      await fetchSettings();
     }
   }
 
@@ -113,6 +219,7 @@
       }
       const data = await resp.json();
       setMasterUi(data.master_id || qrText);
+      await fetchSettings();
       closeMasterModal();
     } catch (error) {
       if (masterLoginHint) {
@@ -134,6 +241,7 @@
       // Мы сознательно не блокируем UI: важнее убрать доступ сразу.
     }
     setMasterUi(null);
+    await fetchSettings();
   }
 
   if (btnMasterLogin) {
@@ -164,4 +272,15 @@
       closeMasterModal();
     }
   });
+
+  if (settingCanReorder) {
+    settingCanReorder.addEventListener("change", () => saveSettings());
+  }
+  if (settingCanEditQty) {
+    settingCanEditQty.addEventListener("change", () => saveSettings());
+  }
+
+  // Стартовая синхронизация настроек.
+  updateSettingsAvailability();
+  fetchSettings();
 })();

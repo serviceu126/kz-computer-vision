@@ -818,6 +818,31 @@
       color: #fecaca;
     }
 
+    /* Блок настроек: компактные чекбоксы, чтобы не ломать верстку. */
+    .settings-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--text-main);
+    }
+
+    .settings-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .settings-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+    }
+
     .shift-plan-mini-btn.disabled {
       opacity: 0.4;
       cursor: not-allowed;
@@ -1266,6 +1291,14 @@
             <span class="dot"></span>
             <span>Удалить выбранное</span>
           </div>
+          <div id="btnShiftPlanMoveUp" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Вверх</span>
+          </div>
+          <div id="btnShiftPlanMoveDown" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Вниз</span>
+          </div>
           <div id="btnShiftPlanUpload" class="action-pill" role="button" tabindex="0">
             <span class="dot"></span>
             <span>Редактировать список</span>
@@ -1278,6 +1311,21 @@
         <div class="pack-meta">Текущий список на смену</div>
         <div class="shift-plan-list" id="shiftPlanList"></div>
         <datalist id="shiftPlanSkuCatalog"></datalist>
+      </div>
+
+      <div class="card settings-card" id="settingsCard">
+        <div class="card-title">Управление / Настройки</div>
+        <div class="settings-row">
+          <input id="settingCanReorder" type="checkbox" />
+          <label for="settingCanReorder">Оператор может менять порядок очереди</label>
+        </div>
+        <div class="settings-row">
+          <input id="settingCanEditQty" type="checkbox" />
+          <label for="settingCanEditQty">Оператор может менять количество SKU</label>
+        </div>
+        <div class="settings-hint" id="settingsHint">
+          Настройки доступны только мастеру. Перед изменением войдите как мастер.
+        </div>
       </div>
 
       <div class="card steps-card">
@@ -1488,6 +1536,13 @@
   let shiftPlanSelectedSku = null;
   let manualModeEnabled = false;
   let shiftPlanCatalogFilter = "";
+
+  // Настройки прав оператора приходят из backend.
+  // Здесь держим их как единый объект, чтобы функции могли опираться на них.
+  const operatorSettings = {
+    operator_can_reorder: true,
+    operator_can_edit_qty: true,
+  };
 
   // Учебный каталог SKU: пока это локальный список,
   // который можно заменить на API без изменения UI-логики.
@@ -2013,6 +2068,7 @@ document.getElementById("bedDetails").textContent =
         renameInput.placeholder = "Название плана для смены";
       }
       renderShiftPlanList([]);
+      updateShiftPlanControlsAvailability();
       return;
     }
 
@@ -2023,6 +2079,7 @@ document.getElementById("bedDetails").textContent =
       renameInput.value = shiftPlanSelected.name;
     }
     renderShiftPlanList(shiftPlanSelected.items);
+    updateShiftPlanControlsAvailability();
   }
 
   function renderShiftPlanList(items) {
@@ -2062,12 +2119,35 @@ document.getElementById("bedDetails").textContent =
       const minusBtn = document.createElement("div");
       minusBtn.className = "shift-plan-mini-btn";
       minusBtn.textContent = "−";
-      minusBtn.addEventListener("click", () => updateShiftPlanQty(item.sku, -1));
+      if (!operatorSettings.operator_can_edit_qty) {
+        minusBtn.classList.add("disabled");
+      }
+      minusBtn.addEventListener("click", () => {
+        if (!operatorSettings.operator_can_edit_qty) {
+          showPackToast("Изменение количества отключено настройками мастера.");
+          return;
+        }
+        updateShiftPlanQty(item.sku, -1);
+      });
 
       const plusBtn = document.createElement("div");
       plusBtn.className = "shift-plan-mini-btn";
       plusBtn.textContent = "+";
-      plusBtn.addEventListener("click", () => updateShiftPlanQty(item.sku, 1));
+      if (!operatorSettings.operator_can_edit_qty) {
+        plusBtn.classList.add("disabled");
+      }
+      plusBtn.addEventListener("click", () => {
+        if (!operatorSettings.operator_can_edit_qty) {
+          showPackToast("Изменение количества отключено настройками мастера.");
+          return;
+        }
+        updateShiftPlanQty(item.sku, 1);
+      });
+
+      const deleteBtn = document.createElement("div");
+      deleteBtn.className = "shift-plan-mini-btn danger";
+      deleteBtn.textContent = "Удалить";
+      deleteBtn.addEventListener("click", () => removeSkuFromShiftPlan(item.sku));
 
       const deleteBtn = document.createElement("div");
       deleteBtn.className = "shift-plan-mini-btn danger";
@@ -2090,6 +2170,92 @@ document.getElementById("bedDetails").textContent =
       row.appendChild(deleteBtn);
       row.appendChild(runBtn);
       listEl.appendChild(row);
+    });
+
+    updateShiftPlanControlsAvailability();
+  }
+
+  function applyOperatorSettings(settings) {
+    /**
+     * Применяем настройки прав оператора, полученные из backend.
+     *
+     * Почему делаем это отдельной функцией:
+     * - kiosk.js получает настройки и передаёт их сюда;
+     * - UI обновляется централизованно и без дублей логики.
+     */
+    if (typeof settings?.operator_can_reorder === "boolean") {
+      operatorSettings.operator_can_reorder = settings.operator_can_reorder;
+    }
+    if (typeof settings?.operator_can_edit_qty === "boolean") {
+      operatorSettings.operator_can_edit_qty = settings.operator_can_edit_qty;
+    }
+    if (shiftPlanSelected) {
+      renderShiftPlanList(shiftPlanSelected.items);
+    }
+    updateShiftPlanControlsAvailability();
+  }
+
+  function updateShiftPlanControlsAvailability() {
+    /**
+     * Управляем доступностью кнопок очереди.
+     *
+     * Принцип:
+     * - порядок (вверх/вниз) зависит от operator_can_reorder;
+     * - плюс/минус обновляются в renderShiftPlanList.
+     */
+    const hasSelection = !!shiftPlanSelectedSku;
+    const reorderAllowed = operatorSettings.operator_can_reorder && hasSelection;
+    if (btnShiftPlanMoveUp) {
+      setActionPillDisabled(btnShiftPlanMoveUp, !reorderAllowed);
+    }
+    if (btnShiftPlanMoveDown) {
+      setActionPillDisabled(btnShiftPlanMoveDown, !reorderAllowed);
+    }
+  }
+
+  // Делаем функцию доступной внешнему скрипту kiosk.js.
+  // Это безопасно, так как мы только обновляем UI.
+  window.applyOperatorSettings = applyOperatorSettings;
+
+  function renderShiftPlanCatalog() {
+    /**
+     * Показываем "живой" каталог SKU с фильтром.
+     *
+     * Что это даёт оператору:
+     * - быстрый выбор по клику;
+     * - визуальный список, а не скрытый выпадающий список;
+     * - поиск по подстроке для экономии времени.
+     */
+    const listEl = document.getElementById("shiftPlanCatalogList");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+
+    const filter = (shiftPlanCatalogFilter || "").toLowerCase();
+    const visibleItems = SHIFT_PLAN_SKU_CATALOG.filter((sku) => {
+      return !filter || sku.toLowerCase().includes(filter);
+    });
+
+    if (!visibleItems.length) {
+      const empty = document.createElement("div");
+      empty.className = "pack-meta";
+      empty.textContent = "Совпадений не найдено.";
+      listEl.appendChild(empty);
+      return;
+    }
+
+    visibleItems.forEach((sku) => {
+      const item = document.createElement("div");
+      item.className = "shift-plan-catalog-item";
+      item.textContent = sku;
+      item.addEventListener("click", () => {
+        if (shiftPlanSkuInput) {
+          shiftPlanSkuInput.value = sku;
+          if (shiftPlanQtyInput) {
+            shiftPlanQtyInput.focus();
+          }
+        }
+      });
+      listEl.appendChild(item);
     });
   }
 
@@ -2243,6 +2409,37 @@ document.getElementById("bedDetails").textContent =
     }
     shiftPlanSelected.items = shiftPlanSelected.items.filter((item) => item.sku !== shiftPlanSelectedSku);
     shiftPlanSelectedSku = null;
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderPackPlanPreview();
+  }
+
+  function moveSelectedSku(direction) {
+    /**
+     * Перемещаем выбранный SKU вверх или вниз в очереди.
+     *
+     * Почему это нужно:
+     * - оператор может оперативно поменять приоритеты;
+     * - движение строго на одну позицию, чтобы избежать ошибок.
+     */
+    if (!operatorSettings.operator_can_reorder) {
+      showPackToast("Изменение порядка отключено настройками мастера.");
+      return;
+    }
+    if (!shiftPlanSelected || !shiftPlanSelectedSku) {
+      showPackToast("Выберите строку в списке, чтобы изменить порядок.");
+      return;
+    }
+    const items = shiftPlanSelected.items;
+    const index = items.findIndex((item) => item.sku === shiftPlanSelectedSku);
+    if (index < 0) return;
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= items.length) {
+      showPackToast("Дальше перемещать нельзя.");
+      return;
+    }
+    const [moved] = items.splice(index, 1);
+    items.splice(newIndex, 0, moved);
     saveShiftPlansToStorage();
     renderShiftPlanPanel();
     renderPackPlanPreview();
@@ -2753,6 +2950,8 @@ function mkModalBtn(text, kind, onClick) {
   const btnShiftPlanSelect = document.getElementById("btnShiftPlanSelect");
   const btnShiftPlanAdd = document.getElementById("btnShiftPlanAdd");
   const btnShiftPlanRemoveSelected = document.getElementById("btnShiftPlanRemoveSelected");
+  const btnShiftPlanMoveUp = document.getElementById("btnShiftPlanMoveUp");
+  const btnShiftPlanMoveDown = document.getElementById("btnShiftPlanMoveDown");
   const shiftPlanSkuInput = document.getElementById("shiftPlanSkuInput");
   const shiftPlanQtyInput = document.getElementById("shiftPlanQtyInput");
   const shiftPlanRenameInput = document.getElementById("shiftPlanRenameInput");
@@ -2822,6 +3021,12 @@ function mkModalBtn(text, kind, onClick) {
   }
   if (btnShiftPlanRemoveSelected) {
     btnShiftPlanRemoveSelected.addEventListener("click", () => removeSelectedSkuFromShiftPlan());
+  }
+  if (btnShiftPlanMoveUp) {
+    btnShiftPlanMoveUp.addEventListener("click", () => moveSelectedSku(-1));
+  }
+  if (btnShiftPlanMoveDown) {
+    btnShiftPlanMoveDown.addEventListener("click", () => moveSelectedSku(1));
   }
   if (btnShiftPlanRename) {
     btnShiftPlanRename.addEventListener("click", () => renameShiftPlan());
