@@ -1137,7 +1137,8 @@
       <span class="dot"></span>
       <span>Очередь</span>
     </div>
-    <div class="pill-btn tab" role="button" tabindex="0" data-screen="screenManagement">
+    <!-- Вкладку "Управление" показываем только мастеру, чтобы не путать оператора. -->
+    <div class="pill-btn tab" role="button" tabindex="0" data-screen="screenManagement" id="tabManagement">
       <span class="dot"></span>
       <span>Управление</span>
     </div>
@@ -1476,16 +1477,6 @@
             <div class="panel-title">Управление / Настройки</div>
           </div>
           <div class="panel-body">
-            <div class="tabbar">
-              <div class="pill-btn tab tab--active" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Управление</span>
-              </div>
-              <div class="pill-btn tab" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Настройки</span>
-              </div>
-            </div>
             <!-- Группируем настройки по смыслу, чтобы оператор читал сверху вниз. -->
             <div class="settings-section">
               <div class="settings-section-title">Права оператора</div>
@@ -1497,12 +1488,35 @@
                 <input id="settingCanEditQty" type="checkbox" />
                 <label for="settingCanEditQty">Оператор может менять количество SKU</label>
               </div>
+              <div class="settings-row">
+                <input id="settingCanAddSku" type="checkbox" />
+                <label for="settingCanAddSku">Оператор может добавлять SKU в смену</label>
+              </div>
+              <div class="settings-row">
+                <input id="settingCanRemoveSku" type="checkbox" />
+                <label for="settingCanRemoveSku">Оператор может удалять SKU из смены</label>
+              </div>
+              <div class="settings-row">
+                <input id="settingCanManualMode" type="checkbox" />
+                <label for="settingCanManualMode">Оператор может включать ручной режим</label>
+              </div>
             </div>
             <div class="settings-section">
               <div class="settings-section-title">Мастер-режим</div>
               <div class="settings-field">
                 <label for="settingMasterTimeout" class="settings-label">Таймаут мастера (мин)</label>
                 <input id="settingMasterTimeout" class="settings-input" type="number" min="1" max="240" value="15" />
+              </div>
+            </div>
+            <!-- Заглушка под будущий каталог SKU, чтобы структура была готова заранее. -->
+            <div class="panel panel--settings" id="catalogPlaceholder">
+              <div class="panel-header">
+                <div class="panel-title">Каталог SKU (скоро)</div>
+              </div>
+              <div class="panel-body">
+                <div class="settings-hint">
+                  Здесь появится каталог SKU и быстрый поиск по моделям.
+                </div>
               </div>
             </div>
             <!-- Кнопки действий держим внизу и справа, чтобы они не мешали чтению. -->

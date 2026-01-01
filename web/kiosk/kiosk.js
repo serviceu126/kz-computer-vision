@@ -16,9 +16,15 @@
   const masterLoginActions = document.getElementById("masterLoginActions");
   const masterLoginCancel = document.getElementById("masterLoginCancel");
 
+  // Вкладка "Управление" доступна только мастеру.
+  const tabManagement = document.getElementById("tabManagement");
+
   // Чекбоксы настроек.
   const settingCanReorder = document.getElementById("settingCanReorder");
   const settingCanEditQty = document.getElementById("settingCanEditQty");
+  const settingCanAddSku = document.getElementById("settingCanAddSku");
+  const settingCanRemoveSku = document.getElementById("settingCanRemoveSku");
+  const settingCanManualMode = document.getElementById("settingCanManualMode");
   const settingMasterTimeout = document.getElementById("settingMasterTimeout");
   const btnSettingsSave = document.getElementById("btnSettingsSave");
   const btnMasterLogoutSettings = document.getElementById("btnMasterLogoutSettings");
@@ -47,6 +53,7 @@
     }
     currentMasterId = masterId || null;
     updateSettingsAvailability();
+    updateManagementTabVisibility();
   }
 
   window.syncMasterState = (masterId) => {
@@ -58,7 +65,29 @@
      */
     currentMasterId = masterId || null;
     updateSettingsAvailability();
+    updateManagementTabVisibility();
   };
+
+  function updateManagementTabVisibility() {
+    /**
+     * Показываем вкладку "Управление" только мастеру.
+     *
+     * Почему так:
+     * - оператору не нужны мастер-настройки;
+     * - меньше лишних элементов и ошибок в интерфейсе.
+     */
+    if (!tabManagement) return;
+    const isMaster = !!currentMasterId;
+    tabManagement.classList.toggle("tab--hidden", !isMaster);
+
+    // Если мастер вышел и мы были на "Управлении", возвращаемся к "Оператору".
+    if (!isMaster && window.activateMainTab) {
+      const activeScreen = document.querySelector(".screen[data-active='true']");
+      if (activeScreen && activeScreen.id === "screenManagement") {
+        window.activateMainTab("screenOperator");
+      }
+    }
+  }
 
   function updateSettingsAvailability() {
     /**
@@ -74,6 +103,15 @@
     }
     if (settingCanEditQty) {
       settingCanEditQty.disabled = !enabled;
+    }
+    if (settingCanAddSku) {
+      settingCanAddSku.disabled = !enabled;
+    }
+    if (settingCanRemoveSku) {
+      settingCanRemoveSku.disabled = !enabled;
+    }
+    if (settingCanManualMode) {
+      settingCanManualMode.disabled = !enabled;
     }
     if (settingMasterTimeout) {
       settingMasterTimeout.disabled = !enabled;
@@ -102,6 +140,15 @@
     if (settingCanEditQty) {
       settingCanEditQty.checked = !!settings.operator_can_edit_qty;
     }
+    if (settingCanAddSku) {
+      settingCanAddSku.checked = !!settings.operator_can_add_sku_to_shift;
+    }
+    if (settingCanRemoveSku) {
+      settingCanRemoveSku.checked = !!settings.operator_can_remove_sku_from_shift;
+    }
+    if (settingCanManualMode) {
+      settingCanManualMode.checked = !!settings.operator_can_manual_mode;
+    }
     if (settingMasterTimeout) {
       settingMasterTimeout.value = String(settings.master_session_timeout_min || 15);
     }
@@ -109,6 +156,9 @@
       window.applyOperatorSettings({
         operator_can_reorder: !!settings.operator_can_reorder,
         operator_can_edit_qty: !!settings.operator_can_edit_qty,
+        operator_can_add_sku_to_shift: !!settings.operator_can_add_sku_to_shift,
+        operator_can_remove_sku_from_shift: !!settings.operator_can_remove_sku_from_shift,
+        operator_can_manual_mode: !!settings.operator_can_manual_mode,
       });
     }
   }
@@ -148,6 +198,9 @@
     const payload = {
       operator_can_reorder: !!settingCanReorder?.checked,
       operator_can_edit_qty: !!settingCanEditQty?.checked,
+      operator_can_add_sku_to_shift: !!settingCanAddSku?.checked,
+      operator_can_remove_sku_from_shift: !!settingCanRemoveSku?.checked,
+      operator_can_manual_mode: !!settingCanManualMode?.checked,
       master_session_timeout_min: timeoutValue,
     };
     try {
@@ -336,6 +389,9 @@
       });
     };
 
+    // Экспортируем функцию наружу, чтобы мастер-режим мог переключать вкладки при выходе.
+    window.activateMainTab = activateScreen;
+
     tabs.forEach((tab) => {
       tab.addEventListener("click", () => {
         const target = tab.dataset.screen;
@@ -350,6 +406,15 @@
   }
   if (settingCanEditQty) {
     settingCanEditQty.addEventListener("change", () => saveSettings());
+  }
+  if (settingCanAddSku) {
+    settingCanAddSku.addEventListener("change", () => saveSettings());
+  }
+  if (settingCanRemoveSku) {
+    settingCanRemoveSku.addEventListener("change", () => saveSettings());
+  }
+  if (settingCanManualMode) {
+    settingCanManualMode.addEventListener("change", () => saveSettings());
   }
   if (btnSettingsSave) {
     btnSettingsSave.addEventListener("click", () => {

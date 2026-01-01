@@ -183,6 +183,9 @@ class MasterLoginRequest(BaseModel):
 class KioskSettingsRequest(BaseModel):
     operator_can_reorder: Optional[bool] = None
     operator_can_edit_qty: Optional[bool] = None
+    operator_can_add_sku_to_shift: Optional[bool] = None
+    operator_can_remove_sku_from_shift: Optional[bool] = None
+    operator_can_manual_mode: Optional[bool] = None
     master_session_timeout_min: Optional[int] = None
 
 
@@ -309,6 +312,31 @@ async def get_state():
         master_mode=bool(master_id),
         master_id=master_id,
     )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/master/login")
@@ -686,7 +714,14 @@ async def get_kiosk_settings_api():
     """
     ensure_master_session_alive()
     settings = get_kiosk_settings(
-        ["operator_can_reorder", "operator_can_edit_qty", "master_session_timeout_min"]
+        [
+            "operator_can_reorder",
+            "operator_can_edit_qty",
+            "operator_can_add_sku_to_shift",
+            "operator_can_remove_sku_from_shift",
+            "operator_can_manual_mode",
+            "master_session_timeout_min",
+        ]
     )
     session = get_master_session()
     master_id = session.get("master_id") if session.get("enabled") else None
@@ -695,6 +730,9 @@ async def get_kiosk_settings_api():
         "settings": {
             "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
             "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
+            "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
+            "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
+            "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
             "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
         },
         "master_mode": bool(master_id),
@@ -723,6 +761,19 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
     if payload.operator_can_edit_qty is not None:
         set_kiosk_setting("operator_can_edit_qty", int(payload.operator_can_edit_qty))
         changed_keys.append("operator_can_edit_qty")
+    if payload.operator_can_add_sku_to_shift is not None:
+        set_kiosk_setting(
+            "operator_can_add_sku_to_shift", int(payload.operator_can_add_sku_to_shift)
+        )
+        changed_keys.append("operator_can_add_sku_to_shift")
+    if payload.operator_can_remove_sku_from_shift is not None:
+        set_kiosk_setting(
+            "operator_can_remove_sku_from_shift", int(payload.operator_can_remove_sku_from_shift)
+        )
+        changed_keys.append("operator_can_remove_sku_from_shift")
+    if payload.operator_can_manual_mode is not None:
+        set_kiosk_setting("operator_can_manual_mode", int(payload.operator_can_manual_mode))
+        changed_keys.append("operator_can_manual_mode")
     if payload.master_session_timeout_min is not None:
         timeout = int(payload.master_session_timeout_min)
         if timeout < 1 or timeout > 240:
@@ -745,13 +796,23 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
             shift_id=get_active_shift_id(),
         )
     settings = get_kiosk_settings(
-        ["operator_can_reorder", "operator_can_edit_qty", "master_session_timeout_min"]
+        [
+            "operator_can_reorder",
+            "operator_can_edit_qty",
+            "operator_can_add_sku_to_shift",
+            "operator_can_remove_sku_from_shift",
+            "operator_can_manual_mode",
+            "master_session_timeout_min",
+        ]
     )
     return {
         "status": "ok",
         "settings": {
             "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
             "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
+            "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
+            "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
+            "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
             "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
         },
         "master_mode": True,

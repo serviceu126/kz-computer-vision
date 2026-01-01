@@ -170,6 +170,18 @@ def init_db():
     )
     cur.execute(
         "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_add_sku_to_shift", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_remove_sku_from_shift", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_manual_mode", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
         ["master_session_timeout_min", 15],
     )
 
