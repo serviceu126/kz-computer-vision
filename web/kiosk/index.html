@@ -1127,9 +1127,9 @@
     <!--<img src="/static/logo.png" class="logo-img" alt="Новые мебельные технологии" /> -->
   </div>
 
-  <!-- Основные вкладки: переключают целые экраны, не трогая логику данных. -->
+  <!-- Основные вкладки: это такие же pill-кнопки, чтобы стиль был единым. -->
   <div class="tabbar" id="mainTabbar">
-    <div class="pill-btn tab tab--active" role="button" tabindex="0" data-screen="screenOperator">
+    <div class="pill-btn pill-btn--active tab tab--active" role="button" tabindex="0" data-screen="screenOperator">
       <span class="dot"></span>
       <span>Оператор</span>
     </div>
@@ -1408,7 +1408,7 @@
 
     <!-- Экран очереди: работа со сменным заданием и SKU. -->
     <div class="screen" id="screenQueue" data-active="false">
-      <div class="container screen-content">
+      <div class="container screen-content screen-content--compact">
         <div class="panel panel--shift-plan" id="shiftPlanCard">
           <div class="panel-header">
             <div class="panel-title">Сменное задание</div>
@@ -1470,7 +1470,7 @@
 
     <!-- Экран управления: смены, мастер и настройки. -->
     <div class="screen" id="screenManagement" data-active="false">
-      <div class="container screen-content">
+      <div class="container screen-content screen-content--compact">
         <div class="panel panel--settings" id="settingsCard">
           <div class="panel-header">
             <div class="panel-title">Управление / Настройки</div>
@@ -1518,7 +1518,7 @@
 
     <!-- Экран статистики: события и показатели. -->
     <div class="screen" id="screenStats" data-active="false">
-      <div class="container screen-content screen-content--stats">
+      <div class="container screen-content screen-content--compact screen-content--stats">
         <!-- Здесь только общая статистика: без "текущей кровати" и списка событий. -->
         <div class="panel">
           <div class="panel-header">

@@ -331,6 +331,8 @@
       });
       tabs.forEach((tab) => {
         tab.classList.toggle("tab--active", tab.dataset.screen === screenId);
+        // Активную вкладку делаем зелёной pill-кнопкой, чтобы она выглядела как остальные действия.
+        tab.classList.toggle("pill-btn--active", tab.dataset.screen === screenId);
       });
     };
 
