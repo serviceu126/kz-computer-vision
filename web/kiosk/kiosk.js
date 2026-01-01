@@ -64,6 +64,10 @@
 
   let masterModalOpen = false;
   let currentMasterId = null;
+  // Единственный источник истины для мастер-режима на фронте.
+  // По умолчанию он выключен, чтобы не показывать лишние вкладки оператору.
+  let uiMasterActive = false;
+  let masterTimeoutId = null;
   let skuModalOpen = false;
   let skuModalMode = "create";
   let skuEditingId = null;
@@ -87,8 +91,12 @@
       btnMasterLogoutSettings.classList.toggle("master-hidden", !masterId);
     }
     currentMasterId = masterId || null;
-    updateSettingsAvailability();
-    renderTabs({ master_active: !!currentMasterId });
+    uiMasterActive = !!currentMasterId;
+    document.body.classList.toggle("is-master-active", uiMasterActive);
+    refreshMasterTimeout();
+  updateSettingsAvailability();
+  document.body.classList.toggle("is-master-active", uiMasterActive);
+  renderTabs();
     if (masterId) {
       fetchSkuCatalog();
     } else {
@@ -104,14 +112,42 @@
      * backend сбросил master_id, UI должен отключить чекбоксы.
      */
     currentMasterId = masterId || null;
+    uiMasterActive = !!currentMasterId;
+    document.body.classList.toggle("is-master-active", uiMasterActive);
+    refreshMasterTimeout();
     updateSettingsAvailability();
-    renderTabs({ master_active: !!currentMasterId });
+    renderTabs();
     if (currentMasterId) {
       fetchSkuCatalog();
     } else {
       clearSkuCatalog();
     }
   };
+
+  function refreshMasterTimeout() {
+    /**
+     * Таймер мастер-режима живёт на фронте только для UX.
+     *
+     * Почему так:
+     * - backend всё равно контролирует таймаут;
+     * - мы делаем UI быстрее и понятнее (вкладки скрываются вовремя).
+     */
+    if (masterTimeoutId) {
+      clearTimeout(masterTimeoutId);
+      masterTimeoutId = null;
+    }
+    if (!uiMasterActive) {
+      localStorage.removeItem("kiosk_master_active");
+      sessionStorage.removeItem("kiosk_master_active");
+      return;
+    }
+    const timeoutMinutes = parseInt(settingMasterTimeout?.value || "15", 10);
+    const safeMinutes = Number.isNaN(timeoutMinutes) ? 15 : Math.max(1, Math.min(timeoutMinutes, 240));
+    masterTimeoutId = setTimeout(() => {
+      // По таймауту делаем мягкий выход: UI сбрасывается и просит мастера войти снова.
+      logoutMaster("timeout");
+    }, safeMinutes * 60 * 1000);
+  }
 
   let activeTabId = "tab-operator";
 
@@ -123,10 +159,10 @@
     document.querySelectorAll(".screen").forEach((screen) => {
       screen.dataset.active = screen.id === tabId ? "true" : "false";
     });
-    renderTabs({ master_active: !!currentMasterId });
+    renderTabs();
   }
 
-  function renderTabs(state) {
+  function renderTabs() {
     /**
      * Рисуем вкладки единым способом.
      *
@@ -135,7 +171,7 @@
      * - активная вкладка подсвечивается как "зелёная пилюля".
      */
     if (!tabbar) return;
-    const isMaster = !!state.master_active;
+    const isMaster = uiMasterActive;
     const tabs = [
       { id: "tab-operator", label: "Оператор" },
       { id: "tab-queue", label: "Очередь" },
@@ -779,7 +815,7 @@
     }
   }
 
-  async function logoutMaster() {
+  async function logoutMaster(reason = "manual") {
     /**
      * Выход из режима мастера.
      *
@@ -790,7 +826,7 @@
       await fetch(API_MASTER_LOGOUT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "manual" }),
+        body: JSON.stringify({ reason }),
       });
     } catch (error) {
       // Мы сознательно не блокируем UI: важнее убрать доступ сразу.
