@@ -21,8 +21,7 @@
   const masterLoginCancel = document.getElementById("masterLoginCancel");
 
   // Вкладка "Управление" доступна только мастеру.
-  const tabManagement = document.getElementById("tabManagement");
-  const tabReports = document.getElementById("tabReports");
+  const tabbar = document.getElementById("mainTabbar");
   const masterOnlyElements = Array.from(document.querySelectorAll(".master-only"));
 
   // Чекбоксы настроек.
@@ -89,7 +88,7 @@
     }
     currentMasterId = masterId || null;
     updateSettingsAvailability();
-    updateManagementTabVisibility();
+    renderTabs({ master_active: !!currentMasterId });
     if (masterId) {
       fetchSkuCatalog();
     } else {
@@ -106,7 +105,7 @@
      */
     currentMasterId = masterId || null;
     updateSettingsAvailability();
-    updateManagementTabVisibility();
+    renderTabs({ master_active: !!currentMasterId });
     if (currentMasterId) {
       fetchSkuCatalog();
     } else {
@@ -114,34 +113,61 @@
     }
   };
 
-  function updateManagementTabVisibility() {
+  let activeTabId = "tab-operator";
+
+  function setActiveTab(tabId) {
     /**
-     * Показываем вкладки "Управление" и "Отчёты" только мастеру.
-     *
-     * Почему так:
-     * - оператору не нужны мастер-настройки;
-     * - меньше лишних элементов и ошибок в интерфейсе.
+     * Меняем активную вкладку и показываем нужный экран.
      */
-    const isMaster = !!currentMasterId;
-    if (tabManagement) {
-      tabManagement.classList.toggle("tab--hidden", !isMaster);
+    activeTabId = tabId;
+    document.querySelectorAll(".screen").forEach((screen) => {
+      screen.dataset.active = screen.id === tabId ? "true" : "false";
+    });
+    renderTabs({ master_active: !!currentMasterId });
+  }
+
+  function renderTabs(state) {
+    /**
+     * Рисуем вкладки единым способом.
+     *
+     * Почему через JS:
+     * - мастер-вкладки можно скрывать без дублирования разметки;
+     * - активная вкладка подсвечивается как "зелёная пилюля".
+     */
+    if (!tabbar) return;
+    const isMaster = !!state.master_active;
+    const tabs = [
+      { id: "tab-operator", label: "Оператор" },
+      { id: "tab-queue", label: "Очередь" },
+    ];
+    if (isMaster) {
+      tabs.push({ id: "tab-admin", label: "Управление" });
+      tabs.push({ id: "tab-reports", label: "Отчёты" });
     }
-    if (tabReports) {
-      tabReports.classList.toggle("tab--hidden", !isMaster);
+    tabs.push({ id: "tab-stats", label: "Статистика" });
+
+    if (!isMaster && (activeTabId === "tab-admin" || activeTabId === "tab-reports")) {
+      activeTabId = "tab-operator";
     }
 
-    // Показываем/скрываем элементы, доступные только мастеру.
+    tabbar.innerHTML = "";
+    tabs.forEach((tab) => {
+      const btn = document.createElement("div");
+      btn.className = "pill-btn tab";
+      if (tab.id === activeTabId) {
+        btn.classList.add("tab--active", "pill-btn--active");
+      }
+      btn.setAttribute("role", "button");
+      btn.setAttribute("tabindex", "0");
+      btn.dataset.target = tab.id;
+      btn.innerHTML = `<span class="dot"></span><span>${tab.label}</span>`;
+      btn.addEventListener("click", () => setActiveTab(tab.id));
+      tabbar.appendChild(btn);
+    });
+
     masterOnlyElements.forEach((el) => {
       el.classList.toggle("master-only-hidden", !isMaster);
     });
-
-    // Если мастер вышел и мы были на "Управлении" или "Отчётах", возвращаемся к "Оператору".
-    if (!isMaster && window.activateMainTab) {
-      const activeScreen = document.querySelector(".screen[data-active='true']");
-      if (activeScreen && (activeScreen.id === "screenManagement" || activeScreen.id === "screenReports")) {
-        window.activateMainTab("screenOperator");
-      }
-    }
   }
 
   function updateSettingsAvailability() {
@@ -244,7 +270,9 @@
       if (data && data.settings) {
         applySettingsToUi(data.settings);
       }
-      setMasterUi((data && data.master_mode) ? (data.master_id || null) : null);
+      if (data && data.master_mode && data.master_id) {
+        setMasterUi(data.master_id);
+      }
     } catch (error) {
       // Молча игнорируем сетевые ошибки, чтобы не мешать оператору.
     }
@@ -803,41 +831,8 @@
     }
   });
 
-  function initMainTabs() {
-    /**
-     * Переключение верхних вкладок.
-     *
-     * Мы не меняем данные и бизнес-логику, только показываем нужный экран.
-     * Это безопасно: все API и таймеры продолжают работать в фоне.
-     */
-    const tabbar = document.getElementById("mainTabbar");
-    if (!tabbar) return;
-    const tabs = Array.from(tabbar.querySelectorAll(".tab"));
-    const screens = Array.from(document.querySelectorAll(".screen"));
-
-    const activateScreen = (screenId) => {
-      screens.forEach((screen) => {
-        const isActive = screen.id === screenId;
-        screen.dataset.active = isActive ? "true" : "false";
-      });
-      tabs.forEach((tab) => {
-        tab.classList.toggle("tab--active", tab.dataset.screen === screenId);
-        // Активную вкладку делаем зелёной pill-кнопкой, чтобы она выглядела как остальные действия.
-        tab.classList.toggle("pill-btn--active", tab.dataset.screen === screenId);
-      });
-    };
-
-    // Экспортируем функцию наружу, чтобы мастер-режим мог переключать вкладки при выходе.
-    window.activateMainTab = activateScreen;
-
-    tabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const target = tab.dataset.screen;
-        if (!target) return;
-        activateScreen(target);
-      });
-    });
-  }
+  // Экспортируем функцию наружу, чтобы можно было переключать вкладки из других модулей.
+  window.activateMainTab = setActiveTab;
 
   if (settingCanReorder) {
     settingCanReorder.addEventListener("change", () => saveSettings());
@@ -907,9 +902,8 @@
 
   // Стартовая синхронизация настроек.
   updateSettingsAvailability();
-  updateManagementTabVisibility();
+  renderTabs({ master_active: !!currentMasterId });
   fetchSettings();
-  initMainTabs();
   fetchSkuCatalog();
   setReportDefaultDates();
 })();

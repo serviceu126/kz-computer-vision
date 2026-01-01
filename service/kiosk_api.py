@@ -5,11 +5,10 @@ import json
 import time
 import sqlite3
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from openpyxl import Workbook
 import csv
 import io
 
@@ -132,6 +131,7 @@ class KioskState(BaseModel):
     # Нужен только для UI, чтобы подсветить, кто имеет право на ручные действия.
     master_mode: bool = False
     master_id: Optional[str] = None
+    master_active: bool = False
 
 
 class StartSessionRequest(BaseModel):
@@ -306,6 +306,17 @@ def build_report_csv(rows: list[dict], headers: list[str]) -> bytes:
 
 
 def build_report_xlsx(rows: list[dict], headers: list[str]) -> bytes:
+    """
+    Собираем XLSX, но импортируем openpyxl только внутри функции.
+
+    Это важно: сервер должен запускаться без openpyxl,
+    а при отсутствии библиотеки мы возвращаем понятную ошибку.
+    """
+    try:
+        from openpyxl import Workbook
+    except ImportError as exc:
+        raise HTTPException(status_code=400, detail="Для XLSX установите openpyxl.") from exc
+
     wb = Workbook()
     ws = wb.active
     ws.append(headers)
@@ -440,7 +451,61 @@ async def get_state():
         ],
         master_mode=bool(master_id),
         master_id=master_id,
+        master_active=bool(master_id),
     )
+
+
+@app.post("/api/kiosk/master/login")
+async def master_login(payload: MasterLoginRequest):
+    """
+    Вход в режим мастера по QR-коду.
+
+    Формат:
+    - буква M и 8 цифр (например, M13540876).
+    Почему так:
+    - формат легко распознаётся сканером;
+    - мы быстро валидируем его без внешних сервисов.
+    """
+    qr_text = (payload.qr_text or "").strip()
+    match = re.fullmatch(r"[MМ](\d{8})", qr_text)
+    if not match:
+        raise HTTPException(
+            status_code=400,
+            detail="Неверный QR мастера. Ожидается формат M######## (например, M13540876).",
+        )
+    master_id = match.group(1)
+    set_master_session(master_id=master_id, last_active_ts=int(time.time()))
+    add_event(
+        event_type="master_login",
+        ts=time.time(),
+        payload_json=json.dumps({"master_id": master_id}, ensure_ascii=False),
+        shift_id=get_active_shift_id(),
+    )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/master/login")
@@ -737,7 +802,7 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
 
 
 @app.post("/api/kiosk/shift_plan/import")
-async def shift_plan_import(file: UploadFile = File(...)):
+async def shift_plan_import(request: Request):
     """
     Импорт сменного задания из CSV (только мастер).
 
@@ -749,7 +814,20 @@ async def shift_plan_import(file: UploadFile = File(...)):
     if not shift_id:
         raise HTTPException(status_code=409, detail="Нет активной смены для импорта плана.")
 
-    if not file.filename or not file.filename.lower().endswith(".csv"):
+    try:
+        import multipart  # noqa: F401
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Нужен python-multipart для загрузки файлов.",
+        ) from exc
+
+    form = await request.form()
+    file = form.get("file")
+    if not file or not getattr(file, "filename", ""):
+        raise HTTPException(status_code=400, detail="Файл не найден в запросе.")
+
+    if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Нужен файл CSV.")
 
     content = await file.read()
