@@ -37,6 +37,7 @@ def _get_shift_info(shift_id: int) -> dict | None:
 def _get_timer_events(shift_id: int) -> list[dict]:
     """
     Читаем события WORK_STARTED/IDLE_STARTED для смены.
+    - Источник истины: таблица events.
     - Сортируем по ts ASC, чтобы считать интервалы последовательно.
     """
     conn = get_conn()
@@ -56,7 +57,8 @@ def _get_timer_events(shift_id: int) -> list[dict]:
 def _get_last_heartbeat_ts(shift_id: int) -> float | None:
     """
     Получаем последний heartbeat по смене.
-    - Нужен для авто-перехода в idle при отсутствии сигналов.
+    - Используется ТОЛЬКО вычислительно для auto-idle,
+      без записи событий состояния work/idle.
     """
     conn = get_conn()
     cur = conn.cursor()
@@ -153,10 +155,11 @@ def compute_work_idle_seconds(
 ) -> tuple[int, int, str | None]:
     """
     Считаем work/idle по событиям смены.
-    - Суммируем интервалы между WORK_STARTED/IDLE_STARTED.
+    - Источник истины: events (WORK_STARTED/IDLE_STARTED).
+    - Суммируем интервалы между событиями.
     - "Хвост" закрываем до end_time (если смена закрыта) или до now_dt.
-    - Auto-idle: если последний heartbeat слишком старый,
-      принудительно считаем текущее состояние как idle (без записи событий).
+    - Auto-idle: если heartbeat слишком старый, вычислительно считаем
+      текущее состояние как idle (без записи новых событий).
     """
     if not shift_id:
         return 0, 0, None
