@@ -46,6 +46,14 @@
   opacity: 1;
 }
 
+/* Активная вкладка должна выглядеть как зелёная "пилюля" действий. */
+.tab.pill-btn--active {
+  background: var(--surface-success);
+  border: var(--border-accent);
+  box-shadow: var(--shadow-pill);
+  color: var(--text-main);
+}
+
 /* Прячем вкладку, если мастер-режим выключен. */
 .tab--hidden {
   display: none;
@@ -88,8 +96,12 @@
 /* Оператор: фиксируем три строки (верх/центр/низ) для стабильной высоты. */
 .screen-content--operator {
   display: grid;
-  /* Верхняя строка — компактная, центр — основной, низ — примерно в 2 раза ниже центра. */
-  grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 0.45fr);
+  /* Сетка оператора: верх — компактный, центр — главный, низ — компактный. */
+  grid-template-rows: auto minmax(0, 1fr) minmax(180px, 0.35fr);
+  grid-template-areas:
+    "top"
+    "middle"
+    "bottom";
   gap: var(--space-2xl);
   min-height: 0;
   overflow: hidden;
@@ -106,6 +118,8 @@
   max-width: var(--modal-max-width);
   width: 100%;
   margin: 0 auto;
+  /* Компактные вкладки читаются лучше с внутренними отступами. */
+  padding: var(--space-2xl) var(--space-3xl);
 }
 
 /* Три ключевые зоны оператора должны уметь сжиматься внутри экрана. */
@@ -115,8 +129,32 @@
   min-height: 0;
 }
 
+/* Привязываем основные блоки оператора к областям сетки. */
+.top-bar {
+  grid-area: top;
+}
+
+.middle {
+  grid-area: middle;
+}
+
+.bottom {
+  grid-area: bottom;
+}
+
 .bottom {
   overflow: hidden;
+}
+
+/* Средняя зона: фиксируем ширину правой колонки, чтобы камера была крупной. */
+.middle {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+}
+
+/* Нижняя строка должна быть компактной, поэтому задаём общую высоту. */
+.bottom {
+  min-height: 180px;
+  max-height: 220px;
 }
 
 /* Камера должна вписываться в доступное место, не расширяя экран. */
@@ -125,9 +163,21 @@
   min-height: 0;
 }
 
+/* Камеру растягиваем на всё поле, чтобы не было пустых полос. */
+.camera-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 /* Правая колонка может прокручиваться, если блоки не помещаются. */
 .right-column {
   overflow-y: auto;
+}
+
+/* Прогресс комплекта делаем заметнее, чтобы он не превращался в тонкую полоску. */
+.panel--steps {
+  min-height: 240px;
 }
 
 /* Список событий прокручивается внутри панели, а не всей страницы. */
