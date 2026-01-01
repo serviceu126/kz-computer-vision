@@ -138,6 +138,7 @@
       height: 100vh;
       padding: var(--space-2xl) var(--space-4xl);
       gap: var(--space-2xl);
+      min-height: 0;
     }
 
     /* ЛОГОТИП */
@@ -192,6 +193,7 @@
     .panel-body {
       position: relative;
       z-index: 1;
+      margin-bottom: var(--space-sm);
     }
 
     .panel-title {
@@ -535,7 +537,8 @@
     .events-list {
       font-size: var(--font-sm);
       flex: 1;
-      overflow: hidden;
+      min-height: 0;
+      overflow-y: auto;
     }
 
     .event-row {
@@ -1131,11 +1134,96 @@
     </div>
   </div>
 
-  <div class="container">
+  <div class="container screens">
     <!-- Экран оператора: показываем только рабочие подсказки и состояние. -->
     <div class="screen" id="screenOperator" data-active="true">
-      <div class="container">
-        <!-- Центр -->
+      <div class="container screen-content screen-content--operator">
+        <!-- Верхняя строка: ключевые панели для оператора (без смены логики). -->
+        <div class="top-bar">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Сотрудник</div>
+            </div>
+            <div class="panel-body">
+              <div class="panel-main">
+                <span id="workerName">—</span>
+                <span class="badge" id="shiftLabel">
+                  <span class="dot"></span>
+                  <span id="shiftInfo">Смена не выбрана</span>
+                </span>
+              </div>
+              <div class="panel-sub" id="workerStats">
+                Сегодня: 0 кроватей, простоев 0 мин
+              </div>
+              <div class="panel-sub" id="workerScanHint"></div>
+              <!-- Статус мастера: показываем, кто имеет доступ к ручным действиям. -->
+              <div class="master-status" id="masterStatus">Мастер: —</div>
+
+              <div class="pill-row">
+                <div id="btnAddWorker" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Добавить сотрудника</span>
+                </div>
+                <div id="btnEndShift" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Завершить смену</span>
+                </div>
+                <div id="btnMasterLogin" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Войти как мастер</span>
+                </div>
+                <div id="btnMasterLogout" class="pill-btn master-hidden" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Выйти (мастер)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Текущая кровать</div>
+            </div>
+            <div class="panel-body">
+              <!-- Большая строка: SKU -->
+              <div class="panel-main bed-mainline">
+                <span id="bedSkuBig">SKU —</span>
+              </div>
+
+              <!-- Пояснение + детали -->
+              <div class="panel-sub" id="bedDetails">
+                Модель — | Размер — | Цвет —
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Время упаковки</div>
+            </div>
+            <div class="panel-body">
+              <div class="panel-main panel-main--compact">
+                <span class="timer" id="sessionTimer">00:00</span>
+                <span id="statusPill" class="status-pill status-warn">
+                  <span class="dot"></span>
+                  <span id="statusText">Ожидание</span>
+                </span>
+              </div>
+              <div class="timers">
+                <div class="timer-chip">
+                  <span class="timer-chip-label">Работа</span>
+                  <span class="timer-chip-value" id="workTimer">00:00</span>
+                </div>
+                <div class="timer-chip">
+                  <span class="timer-chip-label">Простой</span>
+                  <span class="timer-chip-value" id="idleTimer">00:00</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Центр: камера и блоки упаковки. -->
         <div class="middle">
           <div class="panel panel--camera">
             <div class="panel-header">
@@ -1268,12 +1356,46 @@
             </div>
           </div>
         </div>
+
+        <!-- Низ: события и статистика по текущей кровати. -->
+        <div class="bottom">
+          <div class="panel panel--events">
+            <div class="panel-header">
+              <div class="panel-title">Последние события</div>
+            </div>
+            <div class="panel-body">
+              <div class="events-list" id="eventsList"></div>
+            </div>
+          </div>
+          <div class="panel panel--stats">
+            <div class="panel-header">
+              <div class="panel-title">Статистика по упаковке этой кровати</div>
+            </div>
+            <div class="panel-body">
+              <div class="stats-row">
+                <span class="stats-label">Последняя упаковка</span>
+                <span class="stats-value" id="lastPack">—</span>
+              </div>
+              <div class="stats-row">
+                <span class="stats-label">Лучшее время</span>
+                <span class="stats-value" id="bestPack">—</span>
+              </div>
+              <div class="stats-row">
+                <span class="stats-label">Среднее время</span>
+                <span class="stats-value" id="avgPack">—</span>
+              </div>
+              <div class="stats-note">
+                Время считается по завершённым сессиям упаковки этой модели (по SKU).
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Экран очереди: работа со сменным заданием и SKU. -->
     <div class="screen" id="screenQueue" data-active="false">
-      <div class="container">
+      <div class="container screen-content">
         <div class="panel panel--shift-plan" id="shiftPlanCard">
           <div class="panel-header">
             <div class="panel-title">Сменное задание</div>
@@ -1335,94 +1457,7 @@
 
     <!-- Экран управления: смены, мастер и настройки. -->
     <div class="screen" id="screenManagement" data-active="false">
-      <div class="container">
-        <!-- Верх -->
-        <div class="top-bar">
-    <div class="panel">
-      <div class="panel-header">
-        <div class="panel-title">Сотрудник</div>
-      </div>
-      <div class="panel-body">
-        <div class="panel-main">
-          <span id="workerName">—</span>
-          <span class="badge" id="shiftLabel">
-            <span class="dot"></span>
-            <span id="shiftInfo">Смена не выбрана</span>
-          </span>
-        </div>
-        <div class="panel-sub" id="workerStats">
-          Сегодня: 0 кроватей, простоев 0 мин
-        </div>
-        <div class="panel-sub" id="workerScanHint"></div> <!-- НОВАЯ СТРОКА -->
-        <!-- Статус мастера: показываем, кто имеет доступ к ручным действиям. -->
-        <div class="master-status" id="masterStatus">Мастер: —</div>
-
-        <div class="pill-row">
-          <div id="btnAddWorker" class="pill-btn" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Добавить сотрудника</span>
-          </div>
-          <div id="btnEndShift" class="pill-btn" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Завершить смену</span>
-          </div>
-          <div id="btnMasterLogin" class="pill-btn" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Войти как мастер</span>
-          </div>
-          <div id="btnMasterLogout" class="pill-btn master-hidden" role="button" tabindex="0">
-            <span class="dot"></span>
-            <span>Выйти (мастер)</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="panel">
-  <div class="panel-header">
-    <div class="panel-title">Текущая кровать</div>
-  </div>
-  <div class="panel-body">
-
-    <!-- Большая строка: SKU -->
-    <div class="panel-main bed-mainline">
-      <span id="bedSkuBig">SKU —</span>
-    </div>
-
-    <!-- Пояснение + детали -->
-    <div class="panel-sub" id="bedDetails">
-      Модель — | Размер — | Цвет —
-    </div>
-  </div>
-</div>
-
-
-    <div class="panel">
-      <div class="panel-header">
-        <div class="panel-title">Время упаковки</div>
-      </div>
-      <div class="panel-body">
-        <div class="panel-main panel-main--compact">
-          <span class="timer" id="sessionTimer">00:00</span>
-          <span id="statusPill" class="status-pill status-warn">
-            <span class="dot"></span>
-            <span id="statusText">Ожидание</span>
-          </span>
-        </div>
-        <div class="timers">
-          <div class="timer-chip">
-            <span class="timer-chip-label">Работа</span>
-            <span class="timer-chip-value" id="workTimer">00:00</span>
-          </div>
-          <div class="timer-chip">
-            <span class="timer-chip-label">Простой</span>
-            <span class="timer-chip-value" id="idleTimer">00:00</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
+      <div class="container screen-content">
         <div class="panel panel--settings" id="settingsCard">
           <div class="panel-header">
             <div class="panel-title">Управление / Настройки</div>
@@ -1470,36 +1505,49 @@
 
     <!-- Экран статистики: события и показатели. -->
     <div class="screen" id="screenStats" data-active="false">
-      <div class="container">
-        <div class="bottom">
-          <div class="panel panel--events">
-            <div class="panel-header">
-              <div class="panel-title">Последние события</div>
+      <div class="container screen-content screen-content--stats">
+        <!-- Здесь только общая статистика: без "текущей кровати" и списка событий. -->
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Сводка по смене</div>
+          </div>
+          <div class="panel-body">
+            <div class="stats-row">
+              <span class="stats-label">Выпущено комплектов</span>
+              <span class="stats-value">—</span>
             </div>
-            <div class="panel-body">
-              <div class="events-list" id="eventsList"></div>
+            <div class="stats-row">
+              <span class="stats-label">Среднее время упаковки</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Процент простоев</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-note">
+              Данные агрегируются по сменам и сотрудникам.
             </div>
           </div>
-          <div class="panel panel--stats">
-            <div class="panel-header">
-              <div class="panel-title">Статистика по упаковке этой кровати</div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Сотрудники</div>
+          </div>
+          <div class="panel-body">
+            <div class="stats-row">
+              <span class="stats-label">Активные смены</span>
+              <span class="stats-value">—</span>
             </div>
-            <div class="panel-body">
-              <div class="stats-row">
-                <span class="stats-label">Последняя упаковка</span>
-                <span class="stats-value" id="lastPack">—</span>
-              </div>
-              <div class="stats-row">
-                <span class="stats-label">Лучшее время</span>
-                <span class="stats-value" id="bestPack">—</span>
-              </div>
-              <div class="stats-row">
-                <span class="stats-label">Среднее время</span>
-                <span class="stats-value" id="avgPack">—</span>
-              </div>
-              <div class="stats-note">
-                Время считается по завершённым сессиям упаковки этой модели (по SKU).
-              </div>
+            <div class="stats-row">
+              <span class="stats-label">Лучшая выработка</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Средняя выработка</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-note">
+              Отчёты обновляются автоматически при поступлении данных.
             </div>
           </div>
           <div class="steps-list" id="stepsList"></div>
