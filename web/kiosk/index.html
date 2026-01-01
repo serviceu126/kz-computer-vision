@@ -329,9 +329,19 @@
       gap: var(--space-md);
     }
 
+    /* Камера должна занимать всё доступное место панели, поэтому тело делаем растягиваемым. */
+    .panel--camera .panel-body {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      gap: var(--space-md);
+    }
+
     .camera-frame {
       position: relative;
       flex: 1;
+      min-height: 0;
       border-radius: var(--radius-lg);
       overflow: hidden;
       background: var(--neutral-900);
@@ -811,9 +821,10 @@
     /* Прогресс показываем компактно: оператору важнее текущее действие,
        поэтому ограничиваем рост по высоте и не даём блоку "расползаться". */
     .panel--steps {
+      /* Увеличиваем высоту, чтобы список шагов был читаемым, но без растяжения страницы. */
       flex: 0 0 auto;
-      min-height: calc(var(--space-6xl) + var(--space-2xs));
-      max-height: calc(var(--space-6xl) + var(--space-4xl));
+      min-height: calc(var(--space-6xl) + var(--space-5xl));
+      max-height: calc(var(--space-6xl) + var(--space-6xl));
     }
 
     /* Контейнер правой колонки:
@@ -1532,6 +1543,23 @@
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title">Сотрудники</div>
+          </div>
+          <div class="panel-body">
+            <div class="stats-row">
+              <span class="stats-label">Активные смены</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Лучшая выработка</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Средняя выработка</span>
+              <span class="stats-value">—</span>
+            </div>
+            <div class="stats-note">
+              Отчёты обновляются автоматически при поступлении данных.
+            </div>
           </div>
           <div class="panel-body">
             <div class="stats-row">
