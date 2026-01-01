@@ -138,8 +138,73 @@ def init_db():
     )
     """)
 
+    # Таблица настроек киоска.
+    # Храним простые флаги (0/1), чтобы быстро управлять правами оператора.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS kiosk_settings (
+        key TEXT PRIMARY KEY,
+        value INTEGER NOT NULL
+    )
+    """)
+
+    # Дефолтные настройки киоска: если записей нет, добавляем их.
+    # Это нужно, чтобы UI всегда получал ожидаемые значения.
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_reorder", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["operator_can_edit_qty", 1],
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["master_session_timeout_min", 15],
+    )
+
     conn.commit()
     conn.close()
+
+
+def get_kiosk_setting(key: str, default: int = 0) -> int:
+    # Читаем настройку по ключу.
+    # Если записи нет, возвращаем безопасный дефолт.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM kiosk_settings WHERE key=?", [key])
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return int(default)
+    return int(row["value"] or 0)
+
+
+def set_kiosk_setting(key: str, value: int) -> None:
+    # Записываем настройку (0/1) по ключу.
+    # Используем INSERT OR REPLACE, чтобы обновлять без сложных проверок.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT OR REPLACE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        [key, int(value)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_kiosk_settings(keys: list[str]) -> dict[str, int]:
+    # Массовое чтение настроек.
+    # Это ускоряет UI-запросы и упрощает обработку.
+    conn = get_conn()
+    cur = conn.cursor()
+    placeholders = ",".join("?" for _ in keys)
+    cur.execute(
+        f"SELECT key, value FROM kiosk_settings WHERE key IN ({placeholders})",
+        keys,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return {row["key"]: int(row["value"] or 0) for row in (rows or [])}
 
 
 def save_session(session) -> int:
