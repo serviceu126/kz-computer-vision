@@ -157,6 +157,10 @@ def init_db():
         "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
         ["operator_can_edit_qty", 1],
     )
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["master_session_timeout_min", 15],
+    )
 
     conn.commit()
     conn.close()

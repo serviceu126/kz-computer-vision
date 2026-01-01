@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <title>Киоск упаковки кроватей</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/static/kiosk.css" />
   <style>
     :root {
       --bg: #050816;
@@ -1109,7 +1110,7 @@
           </div>
           <div id="btnMasterLogout" class="action-pill master-hidden" role="button" tabindex="0">
             <span class="dot"></span>
-            <span>Выйти из режима мастера</span>
+            <span>Выйти (мастер)</span>
           </div>
         </div>
       </div>
@@ -1315,6 +1316,16 @@
 
       <div class="card settings-card" id="settingsCard">
         <div class="card-title">Управление / Настройки</div>
+        <div class="settings-tabs">
+          <div class="action-pill settings-tab active" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Управление</span>
+          </div>
+          <div class="action-pill settings-tab" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Настройки</span>
+          </div>
+        </div>
         <div class="settings-row">
           <input id="settingCanReorder" type="checkbox" />
           <label for="settingCanReorder">Оператор может менять порядок очереди</label>
@@ -1322,6 +1333,20 @@
         <div class="settings-row">
           <input id="settingCanEditQty" type="checkbox" />
           <label for="settingCanEditQty">Оператор может менять количество SKU</label>
+        </div>
+        <div class="settings-row">
+          <label for="settingMasterTimeout" style="min-width: 220px;">Таймаут мастера (мин)</label>
+          <input id="settingMasterTimeout" class="settings-input" type="number" min="1" max="240" value="15" />
+        </div>
+        <div class="action-row" style="justify-content:flex-start;">
+          <div id="btnSettingsSave" class="action-pill" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Сохранить настройки</span>
+          </div>
+          <div id="btnMasterLogoutSettings" class="action-pill master-hidden" role="button" tabindex="0">
+            <span class="dot"></span>
+            <span>Выйти (мастер)</span>
+          </div>
         </div>
         <div class="settings-hint" id="settingsHint">
           Настройки доступны только мастеру. Перед изменением войдите как мастер.
@@ -1678,6 +1703,9 @@
     }
     if (btnMasterLogout) {
       btnMasterLogout.classList.toggle("master-hidden", !masterId);
+    }
+    if (window.syncMasterState) {
+      window.syncMasterState(masterId);
     }
 
     // Кнопки смены (белая/зелёная)
@@ -2149,11 +2177,6 @@ document.getElementById("bedDetails").textContent =
       deleteBtn.textContent = "Удалить";
       deleteBtn.addEventListener("click", () => removeSkuFromShiftPlan(item.sku));
 
-      const deleteBtn = document.createElement("div");
-      deleteBtn.className = "shift-plan-mini-btn danger";
-      deleteBtn.textContent = "Удалить";
-      deleteBtn.addEventListener("click", () => removeSkuFromShiftPlan(item.sku));
-
       const runBtn = document.createElement("div");
       runBtn.className = "shift-plan-mini-btn";
       runBtn.textContent = "Запустить";
@@ -2216,48 +2239,6 @@ document.getElementById("bedDetails").textContent =
   // Делаем функцию доступной внешнему скрипту kiosk.js.
   // Это безопасно, так как мы только обновляем UI.
   window.applyOperatorSettings = applyOperatorSettings;
-
-  function renderShiftPlanCatalog() {
-    /**
-     * Показываем "живой" каталог SKU с фильтром.
-     *
-     * Что это даёт оператору:
-     * - быстрый выбор по клику;
-     * - визуальный список, а не скрытый выпадающий список;
-     * - поиск по подстроке для экономии времени.
-     */
-    const listEl = document.getElementById("shiftPlanCatalogList");
-    if (!listEl) return;
-    listEl.innerHTML = "";
-
-    const filter = (shiftPlanCatalogFilter || "").toLowerCase();
-    const visibleItems = SHIFT_PLAN_SKU_CATALOG.filter((sku) => {
-      return !filter || sku.toLowerCase().includes(filter);
-    });
-
-    if (!visibleItems.length) {
-      const empty = document.createElement("div");
-      empty.className = "pack-meta";
-      empty.textContent = "Совпадений не найдено.";
-      listEl.appendChild(empty);
-      return;
-    }
-
-    visibleItems.forEach((sku) => {
-      const item = document.createElement("div");
-      item.className = "shift-plan-catalog-item";
-      item.textContent = sku;
-      item.addEventListener("click", () => {
-        if (shiftPlanSkuInput) {
-          shiftPlanSkuInput.value = sku;
-          if (shiftPlanQtyInput) {
-            shiftPlanQtyInput.focus();
-          }
-        }
-      });
-      listEl.appendChild(item);
-    });
-  }
 
   function renderShiftPlanCatalog() {
     /**
@@ -2685,6 +2666,10 @@ document.getElementById("bedDetails").textContent =
       toast.style.display = "none";
     }, 4000);
   }
+
+  // Делаем уведомление доступным внешнему скрипту,
+  // чтобы kiosk.js мог показывать сообщения единым способом.
+  window.showPackToast = showPackToast;
 
   function openShiftModal(mode) {
     modalMode = mode || "add";

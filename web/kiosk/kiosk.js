@@ -19,6 +19,9 @@
   // Чекбоксы настроек.
   const settingCanReorder = document.getElementById("settingCanReorder");
   const settingCanEditQty = document.getElementById("settingCanEditQty");
+  const settingMasterTimeout = document.getElementById("settingMasterTimeout");
+  const btnSettingsSave = document.getElementById("btnSettingsSave");
+  const btnMasterLogoutSettings = document.getElementById("btnMasterLogoutSettings");
   const settingsHint = document.getElementById("settingsHint");
 
   let masterModalOpen = false;
@@ -39,9 +42,23 @@
     if (btnMasterLogout) {
       btnMasterLogout.classList.toggle("master-hidden", !masterId);
     }
+    if (btnMasterLogoutSettings) {
+      btnMasterLogoutSettings.classList.toggle("master-hidden", !masterId);
+    }
     currentMasterId = masterId || null;
     updateSettingsAvailability();
   }
+
+  window.syncMasterState = (masterId) => {
+    /**
+     * Синхронизируем kiosk.js с backend-статусом мастера.
+     *
+     * Это важно для сценария авто-таймаута:
+     * backend сбросил master_id, UI должен отключить чекбоксы.
+     */
+    currentMasterId = masterId || null;
+    updateSettingsAvailability();
+  };
 
   function updateSettingsAvailability() {
     /**
@@ -57,6 +74,12 @@
     }
     if (settingCanEditQty) {
       settingCanEditQty.disabled = !enabled;
+    }
+    if (settingMasterTimeout) {
+      settingMasterTimeout.disabled = !enabled;
+    }
+    if (btnSettingsSave) {
+      btnSettingsSave.classList.toggle("disabled", !enabled);
     }
     if (settingsHint) {
       settingsHint.textContent = enabled
@@ -78,6 +101,9 @@
     }
     if (settingCanEditQty) {
       settingCanEditQty.checked = !!settings.operator_can_edit_qty;
+    }
+    if (settingMasterTimeout) {
+      settingMasterTimeout.value = String(settings.master_session_timeout_min || 15);
     }
     if (window.applyOperatorSettings) {
       window.applyOperatorSettings({
@@ -114,9 +140,15 @@
      * Если backend вернул ошибку, возвращаем прежние значения,
      * чтобы UI не показывал неверное состояние.
      */
+    const timeoutValue = parseInt(settingMasterTimeout?.value || "15", 10);
+    if (Number.isNaN(timeoutValue) || timeoutValue < 1 || timeoutValue > 240) {
+      window.showPackToast?.("Таймаут мастера должен быть от 1 до 240 минут.");
+      return;
+    }
     const payload = {
       operator_can_reorder: !!settingCanReorder?.checked,
       operator_can_edit_qty: !!settingCanEditQty?.checked,
+      master_session_timeout_min: timeoutValue,
     };
     try {
       const resp = await fetch(API_SETTINGS_URL, {
@@ -236,7 +268,11 @@
      * что режим отключается, чтобы избежать ложного чувства доступа.
      */
     try {
-      await fetch(API_MASTER_LOGOUT_URL, { method: "POST" });
+      await fetch(API_MASTER_LOGOUT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "manual" }),
+      });
     } catch (error) {
       // Мы сознательно не блокируем UI: важнее убрать доступ сразу.
     }
@@ -278,6 +314,26 @@
   }
   if (settingCanEditQty) {
     settingCanEditQty.addEventListener("change", () => saveSettings());
+  }
+  if (btnSettingsSave) {
+    btnSettingsSave.addEventListener("click", () => {
+      if (btnSettingsSave.classList.contains("disabled")) {
+        return;
+      }
+      saveSettings();
+    });
+  }
+  if (btnMasterLogoutSettings) {
+    btnMasterLogoutSettings.addEventListener("click", () => logoutMaster());
+  }
+  if (settingMasterTimeout) {
+    settingMasterTimeout.addEventListener("keydown", (event) => {
+      // ENTER удобно использовать как "сохранить".
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveSettings();
+      }
+    });
   }
 
   // Стартовая синхронизация настроек.
