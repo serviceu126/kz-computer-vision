@@ -508,11 +508,7 @@
     const model = /^\d{1,3}$/.test(modelRaw) ? modelRaw.padStart(3, "0") : modelRaw;
     const widthRaw = (skuWidthCm?.value || "").trim();
     const widthValue = parseInt(widthRaw || "0", 10);
-    const width = Number.isFinite(widthValue) && widthValue > 0
-      ? (widthValue >= 100 && widthValue % 10 === 0
-        ? String(widthValue / 10)
-        : String(widthValue))
-      : "";
+    const width = Number.isFinite(widthValue) && widthValue > 0 ? String(widthValue) : "";
     const fabric = (skuFabricCode?.value || "").trim();
     const colorRaw = (skuColorCode?.value || "").trim();
     const color = colorRaw ? colorRaw.padStart(2, "0").slice(-2) : "";
@@ -570,10 +566,9 @@
       if (skuColorCode) skuColorCode.value = item.color_code || "";
       if (skuName) skuName.value = item.name || "";
       if (skuIsActive) skuIsActive.checked = !!item.is_active;
-      setSkuFormDisabled(true);
-      if (skuPreviewValue) {
-        skuPreviewValue.textContent = item.sku_code || "—";
-      }
+      // Учительская подсказка: в режиме редактирования поля доступны, чтобы обновлять модель/размер/цвет.
+      setSkuFormDisabled(false);
+      buildSkuPreview();
     } else {
       if (skuModelCode) skuModelCode.value = "";
       if (skuWidthCm) skuWidthCm.value = "";
@@ -892,25 +887,52 @@
         status.className = "sku-catalog-meta";
         status.textContent = item.is_active ? "Активен" : "Неактивен";
 
-        const actions = document.createElement("div");
-        actions.className = "sku-catalog-actions";
+      const actions = document.createElement("div");
+      actions.className = "sku-catalog-actions";
+      if (uiMasterActive) {
         const editBtn = document.createElement("div");
         editBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
         editBtn.innerHTML = "<span class=\"dot\"></span><span>Редактировать</span>";
         editBtn.addEventListener("click", () => openSkuModal("edit", item));
         actions.appendChild(editBtn);
 
+        const deleteBtn = document.createElement("div");
+        deleteBtn.className = "pill-btn pill-btn--danger pill-btn--mini";
+        deleteBtn.innerHTML = "<span class=\"dot\"></span><span>Удалить</span>";
+        deleteBtn.addEventListener("click", () => requestSkuDelete(item));
+        actions.appendChild(deleteBtn);
+      }
+
         row.appendChild(code);
         row.appendChild(name);
         row.appendChild(status);
-        row.appendChild(actions);
-        list.appendChild(row);
-      });
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
 
       column.appendChild(title);
       column.appendChild(list);
       skuCatalogList.appendChild(column);
     });
+  }
+
+  async function requestSkuDelete(item) {
+    /**
+     * Учительская подсказка: удаление подтверждаем, чтобы избежать случайных потерь.
+     */
+    if (!item || !item.id) return;
+    const ok = window.confirm(`Удалить SKU ${item.sku_code}?`);
+    if (!ok) return;
+    try {
+      const resp = await fetch(`${API_SKU_URL}/${item.id}`, { method: "DELETE" });
+      if (!resp.ok) {
+        window.showPackToast?.("Не удалось удалить SKU.");
+        return;
+      }
+      fetchSkuCatalog();
+    } catch (error) {
+      window.showPackToast?.("Ошибка сети: SKU не удалён.");
+    }
   }
 
   function renderSkuCatalog(items) {
@@ -926,8 +948,18 @@
      * В режиме редактирования меняем только имя и активность.
      */
     if (skuModalMode === "edit" && skuEditingId) {
+      const skuCode = buildSkuPreview();
+      if (!validateSkuCanonical(skuCode)) {
+        window.showPackToast?.("Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.");
+        return;
+      }
       const payload = {
+        sku_code: skuCode,
         name: (skuName?.value || "").trim(),
+        model_code: (skuModelCode?.value || "").trim(),
+        width_cm: parseInt(skuWidthCm?.value || "0", 10),
+        fabric_code: (skuFabricCode?.value || "").trim(),
+        color_code: (skuColorCode?.value || "").trim(),
         is_active: !!skuIsActive?.checked,
       };
       try {

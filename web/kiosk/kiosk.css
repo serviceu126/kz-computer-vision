@@ -485,14 +485,23 @@ body:not(.is-master-active) .screen--master {
   align-items: center;
 }
 
+#skuCatalogPanel {
+  /* Учительский комментарий: расширяем каталог, чтобы 4 колонки читались спокойно. */
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+}
+
 .sku-catalog-grid {
   /* Учительский комментарий: каталог — это витрина из 4 колонок. */
   margin-top: var(--space-lg);
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: var(--space-lg);
   overflow-x: auto;
   padding-bottom: var(--space-sm);
+  max-height: 520px;
+  overflow-y: auto;
 }
 
 .sku-catalog-column {

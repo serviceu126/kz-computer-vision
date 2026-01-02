@@ -476,6 +476,60 @@ def update_sku_catalog_item(
     conn.close()
 
 
+def update_sku_catalog_item_full(
+    sku_id: int,
+    sku_code: str,
+    name: str,
+    model_code: str,
+    width_cm: int,
+    fabric_code: str,
+    color_code: str,
+    is_active: int,
+) -> None:
+    """
+    Полностью обновляет SKU, включая код и параметры.
+
+    Учительская ремарка:
+    - это нужно для редактирования в UI;
+    - код должен оставаться каноническим.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE sku_catalog
+           SET sku_code=?, name=?, model_code=?, width_cm=?, fabric_code=?,
+               color_code=?, is_active=?, updated_at=?
+           WHERE id=?""",
+        [
+            sku_code,
+            name,
+            model_code,
+            int(width_cm),
+            fabric_code,
+            color_code,
+            int(is_active),
+            int(time.time()),
+            int(sku_id),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_sku_catalog_item(sku_id: int) -> None:
+    """
+    Удаляет SKU из каталога.
+
+    Учительская ремарка:
+    - удаление окончательное, поэтому делаем подтверждение в UI.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM sku_catalog WHERE id=?", [int(sku_id)])
+    conn.commit()
+    conn.close()
+
+
 def get_active_sku_codes() -> set[str]:
     """
     Возвращает множество активных SKU из каталога.

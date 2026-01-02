@@ -37,6 +37,8 @@ from core.storage import (
     list_sku_catalog,
     create_sku_catalog_item,
     update_sku_catalog_item,
+    update_sku_catalog_item_full,
+    delete_sku_catalog_item,
     get_report_rows,
     get_sku_catalog_validation_data,
     list_queue_items,
@@ -231,7 +233,12 @@ class SkuCreateRequest(BaseModel):
 
 
 class SkuUpdateRequest(BaseModel):
+    sku_code: Optional[str] = None
     name: Optional[str] = None
+    model_code: Optional[str] = None
+    width_cm: Optional[int] = None
+    fabric_code: Optional[str] = None
+    color_code: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -567,9 +574,8 @@ def build_canonical_sku(model_code: str, width_cm: int, fabric_code: str, color_
     Канон: MM.Кровать.NNN-NN.Модель.XX
     """
     model = (model_code or "").strip()
-    # Учительская подсказка: размер приводим к формату NNN-NN, например 160 -> 16.
-    width_value = int(width_cm)
-    width = str(int(width_value / 10)) if width_value >= 100 and width_value % 10 == 0 else str(width_value)
+    # Учительская подсказка: размер берём как ввёл пользователь (например 16).
+    width = str(int(width_cm))
     fabric = (fabric_code or "").strip()
     color_raw = str(color_code or "").strip()
     color = color_raw.zfill(2)[-2:]
@@ -1595,14 +1601,56 @@ async def sku_create(payload: SkuCreateRequest):
 @app.put("/api/kiosk/sku/{sku_id}")
 async def sku_update(sku_id: int, payload: SkuUpdateRequest):
     """
-    Редактирует SKU (только имя и активность), только мастер.
+    Редактирует SKU, только мастер.
     """
     ensure_master_mode()
-    update_sku_catalog_item(
-        sku_id=sku_id,
-        name=payload.name.strip() if payload.name is not None else None,
-        is_active=1 if payload.is_active else (0 if payload.is_active is False else None),
-    )
+    if payload.model_code is not None or payload.width_cm is not None or payload.fabric_code is not None:
+        # Учительская подсказка: при полном редактировании пересобираем SKU и валидируем его.
+        model_code = (payload.model_code or "").strip()
+        width_cm = int(payload.width_cm or 0)
+        fabric_code = (payload.fabric_code or "").strip()
+        color_code = (payload.color_code or "").strip()
+        sku_code = build_canonical_sku(
+            model_code=model_code,
+            width_cm=width_cm,
+            fabric_code=fabric_code,
+            color_code=color_code,
+        )
+        sku_code, reason = validate_sku_format(sku_code)
+        if not sku_code:
+            raise HTTPException(
+                status_code=400,
+                detail=reason or "Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.",
+            )
+        try:
+            update_sku_catalog_item_full(
+                sku_id=sku_id,
+                sku_code=sku_code,
+                name=(payload.name or "").strip(),
+                model_code=model_code,
+                width_cm=width_cm,
+                fabric_code=fabric_code,
+                color_code=color_code,
+                is_active=1 if payload.is_active else 0,
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.") from exc
+    else:
+        update_sku_catalog_item(
+            sku_id=sku_id,
+            name=payload.name.strip() if payload.name is not None else None,
+            is_active=1 if payload.is_active else (0 if payload.is_active is False else None),
+        )
+    return {"status": "ok"}
+
+
+@app.delete("/api/kiosk/sku/{sku_id}")
+async def sku_delete(sku_id: int):
+    """
+    Удаляет SKU из каталога, только мастер.
+    """
+    ensure_master_mode()
+    delete_sku_catalog_item(sku_id)
     return {"status": "ok"}
 
 
