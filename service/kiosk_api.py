@@ -212,6 +212,7 @@ class KioskSettingsRequest(BaseModel):
     operator_can_add_sku_to_shift: Optional[bool] = None
     operator_can_remove_sku_from_shift: Optional[bool] = None
     operator_can_manual_mode: Optional[bool] = None
+    allow_operator_shift_plan_import: Optional[bool] = None
     master_session_timeout_min: Optional[int] = None
 
 
@@ -397,6 +398,64 @@ def detect_csv_delimiter(sample_line: str) -> str:
 
 
 MAX_SHIFT_PLAN_ROWS = 500
+
+
+def normalize_sku_code(raw: str, catalog_map: dict) -> tuple[str | None, str | None]:
+    """
+    Нормализуем SKU так, чтобы он совпал с ключами каталога.
+
+    Учительская логика:
+    - сначала проверяем точное совпадение;
+    - затем мягко пробуем варианты (убрать префикс, заменить точки на дефисы);
+    - если каталога нет, возвращаем сырой SKU и не ругаемся.
+    """
+    sku_raw = (raw or "").strip()
+    if not sku_raw:
+        return None, "SKU пустой после очистки."
+    if not catalog_map:
+        return sku_raw, None
+
+    catalog_keys = set(catalog_map.keys())
+    seen: set[str] = set()
+    candidates: list[str] = []
+
+    def add_candidate(value: str) -> None:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            return
+        # Учительская подсказка: приводим повторяющиеся разделители к одному.
+        cleaned = re.sub(r"[.]{2,}", ".", cleaned)
+        cleaned = re.sub(r"[-]{2,}", "-", cleaned)
+        if cleaned in seen:
+            return
+        seen.add(cleaned)
+        candidates.append(cleaned)
+
+    prefix = "MM.Кровать."
+    add_candidate(sku_raw)
+
+    if sku_raw.startswith(prefix):
+        add_candidate(sku_raw[len(prefix) :])
+
+    if "." in sku_raw:
+        last_dot = sku_raw.rfind(".")
+        add_candidate(sku_raw[:last_dot] + "-" + sku_raw[last_dot + 1 :])
+
+    if sku_raw.startswith(prefix):
+        stripped = sku_raw[len(prefix) :]
+        if "." in stripped:
+            last_dot = stripped.rfind(".")
+            add_candidate(stripped[:last_dot] + "-" + stripped[last_dot + 1 :])
+
+    add_candidate(sku_raw.replace(".", "-"))
+    if sku_raw.startswith(prefix):
+        add_candidate(sku_raw[len(prefix) :].replace(".", "-"))
+
+    for candidate in candidates:
+        if candidate in catalog_keys:
+            return candidate, None
+
+    return None, "SKU не найден в каталоге после нормализации."
 
 
 def parse_shift_plan_csv_file(text: str) -> tuple[list[dict], list[str]]:
@@ -1155,13 +1214,25 @@ async def shift_plan_get():
 @app.post("/api/kiosk/shift_plan/import")
 async def shift_plan_import(file: UploadFile = File(...)):
     """
-    Импорт сменного задания из CSV или JSON (только мастер).
+    Импорт сменного задания из CSV (мастер или разрешённый оператор).
 
-    Мы принимаем файл и сразу активируем план,
-    чтобы оператор видел актуальный список без дополнительных шагов.
+    Учительская ремарка:
+    - файл сразу активирует план, чтобы очередь обновилась без лишних шагов;
+    - импорт остаётся CSV, Excel/JSON добавим позже при необходимости.
+
+    Команды для проверки (как в инструкции):
+    - запуск сервера: python -m uvicorn service.kiosk_api:app --host 0.0.0.0 --port 8000 --reload
+    - проверка импорта: curl -F "file=@plan.csv" http://127.0.0.1:8000/api/kiosk/shift_plan/import
     """
-    ensure_master_mode()
-    update_master_activity()
+    ensure_master_session_alive()
+    allow_operator_import = bool(get_kiosk_setting("allow_operator_shift_plan_import", 0))
+    if not is_master_active() and not allow_operator_import:
+        raise HTTPException(
+            status_code=403,
+            detail="Импорт доступен только мастеру или при разрешении в настройках.",
+        )
+    if is_master_active():
+        update_master_activity()
 
     # Проверяем наличие python-multipart только при попытке импорта,
     # чтобы сервер мог запускаться без дополнительной зависимости.
@@ -1174,20 +1245,19 @@ async def shift_plan_import(file: UploadFile = File(...)):
     if not file or not file.filename:
         raise HTTPException(status_code=400, detail="Файл не найден в запросе.")
 
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Поддерживается только CSV.")
+
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Файл пуст.")
 
-    filename = file.filename.lower()
     text = content.decode("utf-8-sig", errors="replace")
     items: list[dict] = []
     errors: list[str] = []
     plan_name = ""
 
-    if filename.endswith(".json") or "application/json" in (file.content_type or ""):
-        plan_name, items, errors = parse_shift_plan_json_file(text)
-    else:
-        items, errors = parse_shift_plan_csv_file(text)
+    items, errors = parse_shift_plan_csv_file(text)
 
     if errors:
         return JSONResponse(status_code=400, content={"errors": errors})
@@ -1199,19 +1269,34 @@ async def shift_plan_import(file: UploadFile = File(...)):
     if not plan_name:
         plan_name = "Сменное задание"
 
-    sku_codes = [item["sku_code"] for item in items]
-    sku_map = get_sku_catalog_map(sku_codes)
-    unknown_skus = [sku for sku in sku_codes if sku not in sku_map]
+    # Учительская подсказка: загружаем активный каталог и нормализуем SKU под него.
+    catalog_items = list_sku_catalog(include_inactive=False)
+    catalog_map = {row["sku_code"]: row for row in catalog_items}
+
     normalized_items = []
+    unknown_skus: list[str] = []
+    items_for_storage: list[dict] = []
     for item in items:
-        sku_meta = sku_map.get(item["sku_code"]) or {}
+        raw_code = item["sku_code"]
+        normalized_code, _reason = normalize_sku_code(raw_code, catalog_map)
+        if normalized_code:
+            sku_code = normalized_code
+        else:
+            sku_code = raw_code.strip()
+            unknown_skus.append(raw_code.strip())
+
+        sku_meta = catalog_map.get(sku_code) or {}
         normalized_items.append(
             {
-                "sku_code": item["sku_code"],
+                "sku_code": sku_code,
                 "qty": int(item["qty"]),
                 "name": sku_meta.get("name"),
             }
         )
+        items_for_storage.append({"sku_code": sku_code, "qty": int(item["qty"])})
+
+    # Убираем дубликаты, чтобы предупреждение было коротким и понятным.
+    unknown_skus = list(dict.fromkeys([sku for sku in unknown_skus if sku]))
 
     # Если смены нет, сохраняем с нулевым shift_id,
     # чтобы мастер всё равно мог подготовить план заранее.
@@ -1220,13 +1305,13 @@ async def shift_plan_import(file: UploadFile = File(...)):
         shift_id=shift_id,
         name=plan_name,
         created_at=time.time(),
-        items=items,
+        items=items_for_storage,
     )
 
     return {
         "plan_id": plan_id,
         "plan_name": plan_name,
-        "total_items": len(items),
+        "total_items": len(items_for_storage),
         "unknown_skus": unknown_skus,
         "normalized_items": normalized_items,
     }
@@ -1338,6 +1423,7 @@ async def get_kiosk_settings_api():
             "operator_can_add_sku_to_shift",
             "operator_can_remove_sku_from_shift",
             "operator_can_manual_mode",
+            "allow_operator_shift_plan_import",
             "master_session_timeout_min",
         ]
     )
@@ -1351,6 +1437,9 @@ async def get_kiosk_settings_api():
             "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
             "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
             "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
+            "allow_operator_shift_plan_import": bool(
+                settings.get("allow_operator_shift_plan_import", 0)
+            ),
             "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
         },
         "master_mode": bool(master_id),
@@ -1392,6 +1481,12 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
     if payload.operator_can_manual_mode is not None:
         set_kiosk_setting("operator_can_manual_mode", int(payload.operator_can_manual_mode))
         changed_keys.append("operator_can_manual_mode")
+    if payload.allow_operator_shift_plan_import is not None:
+        set_kiosk_setting(
+            "allow_operator_shift_plan_import",
+            int(payload.allow_operator_shift_plan_import),
+        )
+        changed_keys.append("allow_operator_shift_plan_import")
     if payload.master_session_timeout_min is not None:
         timeout = int(payload.master_session_timeout_min)
         if timeout < 1 or timeout > 240:
@@ -1420,6 +1515,7 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
             "operator_can_add_sku_to_shift",
             "operator_can_remove_sku_from_shift",
             "operator_can_manual_mode",
+            "allow_operator_shift_plan_import",
             "master_session_timeout_min",
         ]
     )
@@ -1431,6 +1527,9 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
             "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
             "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
             "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
+            "allow_operator_shift_plan_import": bool(
+                settings.get("allow_operator_shift_plan_import", 0)
+            ),
             "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
         },
         "master_mode": True,

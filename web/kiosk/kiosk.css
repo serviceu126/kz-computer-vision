@@ -288,6 +288,14 @@ body:not(.is-master-active) .screen--master {
   color: var(--text-muted);
 }
 
+.shift-plan-import-hint {
+  /* Учительский комментарий: подсказка нужна, когда кнопка импорта заблокирована. */
+  display: none;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-2xs);
+}
+
 .reports-stub {
   display: flex;
   flex-direction: column;

@@ -1465,11 +1465,14 @@
                   <span class="dot"></span>
                   <span>Редактировать список</span>
                 </div>
-                <!-- Импорт CSV доступен только мастеру и открывает системный выбор файла. -->
-                <div id="btnShiftPlanImport" class="pill-btn pill-btn--import master-only master-only-hidden"
+                <!-- Импорт CSV может быть разрешён оператору через настройки мастера. -->
+                <div id="btnShiftPlanImport" class="pill-btn pill-btn--import"
                      role="button" tabindex="0">
                   <span class="dot"></span>
                   <span>Импорт сменного задания (CSV)</span>
+                </div>
+                <div class="shift-plan-import-hint" id="shiftPlanImportHint">
+                  Импорт доступен только мастеру или при разрешении в настройках.
                 </div>
                 <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
                   <span class="dot"></span>
@@ -1479,7 +1482,7 @@
               <input id="shiftPlanImportFile" class="file-input-hidden" type="file" accept=".csv,text/csv" />
               <!-- Отдельный input для импорта плана (CSV/JSON). -->
               <input id="shiftPlanFileInput" class="file-input-hidden" type="file"
-                     accept=".csv,.json,application/json,text/csv" />
+                     accept=".csv,text/csv" />
             </div>
             <div class="queue-main">
               <div class="pack-meta">Текущий список на смену</div>
@@ -1522,6 +1525,10 @@
               <div class="settings-row">
                 <input id="allowManualMode" type="checkbox" />
                 <label for="allowManualMode">Разрешить ручной режим</label>
+              </div>
+              <div class="settings-row">
+                <input id="allowShiftPlanImport" type="checkbox" />
+                <label for="allowShiftPlanImport">Разрешить оператору импорт сменного задания (CSV) с флешки</label>
               </div>
               <div class="settings-row">
                 <input id="allowSkipSku" type="checkbox" />
@@ -1951,6 +1958,7 @@
     allow_remove_sku: true,
     allow_add_from_catalog: true,
     allow_manual_mode: true,
+    allow_shift_plan_import: false,
     allow_skip_sku: true,
   };
 
@@ -2092,6 +2100,8 @@
     if (window.syncMasterState) {
       window.syncMasterState(masterId);
     }
+    // Учительская подсказка: обновляем доступность кнопок очереди при смене режима.
+    updateShiftPlanControlsAvailability();
 
     // Кнопки смены (белая/зелёная)
     setActionPillActive(btnAddWorker, !!state.shift_active);
@@ -2730,6 +2740,9 @@ document.getElementById("bedDetails").textContent =
     if (typeof settings?.allow_manual_mode === "boolean") {
       operatorSettings.allow_manual_mode = settings.allow_manual_mode;
     }
+    if (typeof settings?.allow_shift_plan_import === "boolean") {
+      operatorSettings.allow_shift_plan_import = settings.allow_shift_plan_import;
+    }
     if (typeof settings?.allow_skip_sku === "boolean") {
       operatorSettings.allow_skip_sku = settings.allow_skip_sku;
     }
@@ -2772,6 +2785,14 @@ document.getElementById("bedDetails").textContent =
     }
     if (shiftPlanQtyInput) {
       shiftPlanQtyInput.disabled = !operatorSettings.allow_add_from_catalog;
+    }
+    if (btnShiftPlanImport) {
+      const isMasterActive = document.body.classList.contains("is-master-active");
+      const importAllowed = isMasterActive || operatorSettings.allow_shift_plan_import;
+      setActionPillDisabled(btnShiftPlanImport, !importAllowed);
+      if (shiftPlanImportHint) {
+        shiftPlanImportHint.style.display = importAllowed ? "none" : "block";
+      }
     }
   }
 
@@ -3513,6 +3534,7 @@ function mkModalBtn(text, kind, onClick) {
   const shiftPlanStatusCount = document.getElementById("shiftPlanStatusCount");
   const shiftPlanStatusCreated = document.getElementById("shiftPlanStatusCreated");
   const shiftPlanUnknownWarning = document.getElementById("shiftPlanUnknownWarning");
+  const shiftPlanImportHint = document.getElementById("shiftPlanImportHint");
   const shiftPlanSkuInput = document.getElementById("shiftPlanSkuInput");
   const shiftPlanQtyInput = document.getElementById("shiftPlanQtyInput");
   const shiftPlanRenameInput = document.getElementById("shiftPlanRenameInput");
@@ -3617,6 +3639,10 @@ function mkModalBtn(text, kind, onClick) {
        *
        * Так мы остаёмся внутри киоска и не уводим пользователя в файловый менеджер.
        */
+      if (btnShiftPlanImport.classList.contains("pill-btn--disabled")) {
+        showPackToast("Импорт доступен только мастеру или при разрешении в настройках.");
+        return;
+      }
       shiftPlanImportFile.click();
     });
     shiftPlanImportFile.addEventListener("change", () => {

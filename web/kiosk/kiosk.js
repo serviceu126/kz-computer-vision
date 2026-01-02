@@ -34,6 +34,7 @@
   const settingCanRemoveSku = document.getElementById("allowRemoveSku");
   const settingCanAddSku = document.getElementById("allowAddFromCatalog");
   const settingCanManualMode = document.getElementById("allowManualMode");
+  const settingAllowShiftPlanImport = document.getElementById("allowShiftPlanImport");
   const settingCanSkipSku = document.getElementById("allowSkipSku");
   const settingMasterTimeout = document.getElementById("settingMasterTimeout");
   const btnSettingsSave = document.getElementById("btnSettingsSave");
@@ -297,6 +298,9 @@
     if (settingCanManualMode) {
       settingCanManualMode.disabled = !enabled;
     }
+    if (settingAllowShiftPlanImport) {
+      settingAllowShiftPlanImport.disabled = !enabled;
+    }
     if (settingCanSkipSku) {
       settingCanSkipSku.disabled = !enabled;
     }
@@ -315,7 +319,7 @@
 
   window.importShiftPlanFile = async (file) => {
     /**
-     * Импорт сменного задания в мастер-режиме (CSV или JSON).
+     * Импорт сменного задания в мастер-режиме (только CSV).
      *
      * Мы отправляем файл на backend и показываем итог:
      * - успех: "Импортировано N позиций";
@@ -323,6 +327,10 @@
      * - отсутствие python-multipart: отдельное сообщение.
      */
     if (!file) return;
+    if (!String(file.name || "").toLowerCase().endsWith(".csv")) {
+      window.showPackToast?.("Поддерживается только CSV. Пожалуйста, выберите файл .csv.");
+      return;
+    }
     const formData = new FormData();
     formData.append("file", file);
     try {
@@ -399,6 +407,9 @@
     if (settingCanManualMode) {
       settingCanManualMode.checked = !!settings.operator_can_manual_mode;
     }
+    if (settingAllowShiftPlanImport) {
+      settingAllowShiftPlanImport.checked = !!settings.allow_operator_shift_plan_import;
+    }
     if (settingCanSkipSku) {
       // Пока backend не хранит этот флаг, оставляем false и явно показываем TODO.
       // TODO: добавить operator_can_skip_sku в настройках backend.
@@ -414,6 +425,7 @@
         allow_add_from_catalog: !!settings.operator_can_add_sku_to_shift,
         allow_remove_sku: !!settings.operator_can_remove_sku_from_shift,
         allow_manual_mode: !!settings.operator_can_manual_mode,
+        allow_shift_plan_import: !!settings.allow_operator_shift_plan_import,
         allow_skip_sku: !!settings.operator_can_skip_sku,
       });
     }
@@ -460,8 +472,9 @@
       operator_can_add_sku_to_shift: !!settingCanAddSku?.checked,
       operator_can_remove_sku_from_shift: !!settingCanRemoveSku?.checked,
       operator_can_manual_mode: !!settingCanManualMode?.checked,
+      allow_operator_shift_plan_import: !!settingAllowShiftPlanImport?.checked,
       // TODO: добавить operator_can_skip_sku в backend и сохранять его здесь.
-    master_session_timeout_min: timeoutValue,
+      master_session_timeout_min: timeoutValue,
     };
     try {
       const resp = await fetch(API_SETTINGS_URL, {

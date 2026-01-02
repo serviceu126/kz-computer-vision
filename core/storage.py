@@ -199,6 +199,11 @@ def init_db():
         "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
         ["operator_can_manual_mode", 1],
     )
+    # Учительская ремарка: по умолчанию оператор НЕ может импортировать план с флешки.
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["allow_operator_shift_plan_import", 0],
+    )
     cur.execute(
         "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
         ["master_session_timeout_min", 15],
