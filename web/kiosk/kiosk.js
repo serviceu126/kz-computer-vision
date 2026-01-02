@@ -25,11 +25,12 @@
   const masterOnlyElements = Array.from(document.querySelectorAll(".master-only"));
 
   // Чекбоксы настроек.
-  const settingCanReorder = document.getElementById("settingCanReorder");
-  const settingCanEditQty = document.getElementById("settingCanEditQty");
-  const settingCanAddSku = document.getElementById("settingCanAddSku");
-  const settingCanRemoveSku = document.getElementById("settingCanRemoveSku");
-  const settingCanManualMode = document.getElementById("settingCanManualMode");
+  const settingCanReorder = document.getElementById("allowReorderQueue");
+  const settingCanEditQty = document.getElementById("allowChangeQty");
+  const settingCanRemoveSku = document.getElementById("allowRemoveSku");
+  const settingCanAddSku = document.getElementById("allowAddFromCatalog");
+  const settingCanManualMode = document.getElementById("allowManualMode");
+  const settingCanSkipSku = document.getElementById("allowSkipSku");
   const settingMasterTimeout = document.getElementById("settingMasterTimeout");
   const btnSettingsSave = document.getElementById("btnSettingsSave");
   const btnMasterLogoutSettings = document.getElementById("btnMasterLogoutSettings");
@@ -233,6 +234,9 @@
     if (settingCanManualMode) {
       settingCanManualMode.disabled = !enabled;
     }
+    if (settingCanSkipSku) {
+      settingCanSkipSku.disabled = !enabled;
+    }
     if (settingMasterTimeout) {
       settingMasterTimeout.disabled = !enabled;
     }
@@ -280,16 +284,22 @@
     if (settingCanManualMode) {
       settingCanManualMode.checked = !!settings.operator_can_manual_mode;
     }
+    if (settingCanSkipSku) {
+      // Пока backend не хранит этот флаг, оставляем false и явно показываем TODO.
+      // TODO: добавить operator_can_skip_sku в настройках backend.
+      settingCanSkipSku.checked = !!settings.operator_can_skip_sku;
+    }
     if (settingMasterTimeout) {
       settingMasterTimeout.value = String(settings.master_session_timeout_min || 15);
     }
     if (window.applyOperatorSettings) {
       window.applyOperatorSettings({
-        operator_can_reorder: !!settings.operator_can_reorder,
-        operator_can_edit_qty: !!settings.operator_can_edit_qty,
-        operator_can_add_sku_to_shift: !!settings.operator_can_add_sku_to_shift,
-        operator_can_remove_sku_from_shift: !!settings.operator_can_remove_sku_from_shift,
-        operator_can_manual_mode: !!settings.operator_can_manual_mode,
+        allow_reorder_queue: !!settings.operator_can_reorder,
+        allow_change_qty: !!settings.operator_can_edit_qty,
+        allow_add_from_catalog: !!settings.operator_can_add_sku_to_shift,
+        allow_remove_sku: !!settings.operator_can_remove_sku_from_shift,
+        allow_manual_mode: !!settings.operator_can_manual_mode,
+        allow_skip_sku: !!settings.operator_can_skip_sku,
       });
     }
   }
@@ -335,7 +345,8 @@
       operator_can_add_sku_to_shift: !!settingCanAddSku?.checked,
       operator_can_remove_sku_from_shift: !!settingCanRemoveSku?.checked,
       operator_can_manual_mode: !!settingCanManualMode?.checked,
-      master_session_timeout_min: timeoutValue,
+      // TODO: добавить operator_can_skip_sku в backend и сохранять его здесь.
+    master_session_timeout_min: timeoutValue,
     };
     try {
       const resp = await fetch(API_SETTINGS_URL, {
@@ -887,6 +898,9 @@
   }
   if (settingCanManualMode) {
     settingCanManualMode.addEventListener("change", () => saveSettings());
+  }
+  if (settingCanSkipSku) {
+    settingCanSkipSku.addEventListener("change", () => saveSettings());
   }
   if (btnSettingsSave) {
     btnSettingsSave.addEventListener("click", () => {

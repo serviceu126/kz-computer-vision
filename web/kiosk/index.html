@@ -193,7 +193,6 @@
     .panel-body {
       position: relative;
       z-index: 1;
-      margin-bottom: var(--space-sm);
     }
 
     .panel-title {
@@ -1434,6 +1433,10 @@
                 <span class="dot"></span>
                 <span>Вниз</span>
               </div>
+              <div id="btnShiftPlanSkip" class="pill-btn" role="button" tabindex="0">
+                <span class="dot"></span>
+                <span>Пропустить SKU</span>
+              </div>
               <div id="btnShiftPlanUpload" class="pill-btn" role="button" tabindex="0">
                 <span class="dot"></span>
                 <span>Редактировать список</span>
@@ -1469,33 +1472,28 @@
             <div class="settings-section">
               <div class="settings-section-title">Права оператора</div>
               <div class="settings-row">
-                <input id="settingCanReorder" type="checkbox" />
-                <label for="settingCanReorder">Оператор может менять порядок очереди</label>
+                <input id="allowReorderQueue" type="checkbox" />
+                <label for="allowReorderQueue">Разрешить менять порядок очереди</label>
               </div>
               <div class="settings-row">
-                <input id="settingCanEditQty" type="checkbox" />
-                <label for="settingCanEditQty">Оператор может менять количество SKU</label>
+                <input id="allowChangeQty" type="checkbox" />
+                <label for="allowChangeQty">Разрешить менять количество SKU</label>
               </div>
               <div class="settings-row">
-                <input id="settingCanAddSku" type="checkbox" />
-                <label for="settingCanAddSku">Оператор может добавлять SKU в смену</label>
+                <input id="allowRemoveSku" type="checkbox" />
+                <label for="allowRemoveSku">Разрешить удалять SKU из очереди</label>
               </div>
               <div class="settings-row">
-                <input id="settingCanRemoveSku" type="checkbox" />
-                <label for="settingCanRemoveSku">Оператор может удалять SKU из смены</label>
+                <input id="allowAddFromCatalog" type="checkbox" />
+                <label for="allowAddFromCatalog">Разрешить добавлять SKU из каталога</label>
               </div>
               <div class="settings-row">
-                <input id="settingCanManualMode" type="checkbox" />
-                <label for="settingCanManualMode">Оператор может включать ручной режим</label>
-              </div>
-              <!-- Заготовки под дополнительные права: показываем структуру заранее. -->
-              <div class="settings-row">
-                <input id="settingCanRemoveItem" type="checkbox" disabled />
-                <label for="settingCanRemoveItem">Оператор может удалять SKU из очереди (скоро)</label>
+                <input id="allowManualMode" type="checkbox" />
+                <label for="allowManualMode">Разрешить ручной режим</label>
               </div>
               <div class="settings-row">
-                <input id="settingCanSkipSku" type="checkbox" disabled />
-                <label for="settingCanSkipSku">Оператор может пропускать SKU (скоро)</label>
+                <input id="allowSkipSku" type="checkbox" />
+                <label for="allowSkipSku">Разрешить пропуск SKU (в конец очереди)</label>
               </div>
             </div>
             <div class="settings-section">
@@ -1888,8 +1886,12 @@
   // Настройки прав оператора приходят из backend.
   // Здесь держим их как единый объект, чтобы функции могли опираться на них.
   const operatorSettings = {
-    operator_can_reorder: true,
-    operator_can_edit_qty: true,
+    allow_reorder_queue: true,
+    allow_change_qty: true,
+    allow_remove_sku: true,
+    allow_add_from_catalog: true,
+    allow_manual_mode: true,
+    allow_skip_sku: true,
   };
 
   // Учебный каталог SKU: пока это локальный список,
@@ -2470,11 +2472,11 @@ document.getElementById("bedDetails").textContent =
       const minusBtn = document.createElement("div");
       minusBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
       minusBtn.textContent = "−";
-      if (!operatorSettings.operator_can_edit_qty) {
+      if (!operatorSettings.allow_change_qty) {
         minusBtn.classList.add("pill-btn--disabled");
       }
       minusBtn.addEventListener("click", () => {
-        if (!operatorSettings.operator_can_edit_qty) {
+        if (!operatorSettings.allow_change_qty) {
           showPackToast("Изменение количества отключено настройками мастера.");
           return;
         }
@@ -2484,11 +2486,11 @@ document.getElementById("bedDetails").textContent =
       const plusBtn = document.createElement("div");
       plusBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
       plusBtn.textContent = "+";
-      if (!operatorSettings.operator_can_edit_qty) {
+      if (!operatorSettings.allow_change_qty) {
         plusBtn.classList.add("pill-btn--disabled");
       }
       plusBtn.addEventListener("click", () => {
-        if (!operatorSettings.operator_can_edit_qty) {
+        if (!operatorSettings.allow_change_qty) {
           showPackToast("Изменение количества отключено настройками мастера.");
           return;
         }
@@ -2498,12 +2500,21 @@ document.getElementById("bedDetails").textContent =
       const deleteBtn = document.createElement("div");
       deleteBtn.className = "pill-btn pill-btn--danger pill-btn--mini";
       deleteBtn.textContent = "Удалить";
-      deleteBtn.addEventListener("click", () => removeSkuFromShiftPlan(item.sku));
+      if (!operatorSettings.allow_remove_sku) {
+        deleteBtn.classList.add("pill-btn--disabled");
+      }
+      deleteBtn.addEventListener("click", () => {
+        if (!operatorSettings.allow_remove_sku) {
+          showPackToast("Удаление SKU отключено настройками мастера.");
+          return;
+        }
+        removeSkuFromShiftPlan(item.sku);
+      });
 
       const runBtn = document.createElement("div");
       runBtn.className = "pill-btn pill-btn--primary pill-btn--mini";
       runBtn.textContent = "Запустить";
-      if (!manualModeEnabled) {
+      if (!manualModeEnabled || !operatorSettings.allow_manual_mode) {
         runBtn.classList.add("pill-btn--disabled");
       } else {
         runBtn.addEventListener("click", () => startSkuFromPlan(item.sku));
@@ -2529,11 +2540,23 @@ document.getElementById("bedDetails").textContent =
      * - kiosk.js получает настройки и передаёт их сюда;
      * - UI обновляется централизованно и без дублей логики.
      */
-    if (typeof settings?.operator_can_reorder === "boolean") {
-      operatorSettings.operator_can_reorder = settings.operator_can_reorder;
+    if (typeof settings?.allow_reorder_queue === "boolean") {
+      operatorSettings.allow_reorder_queue = settings.allow_reorder_queue;
     }
-    if (typeof settings?.operator_can_edit_qty === "boolean") {
-      operatorSettings.operator_can_edit_qty = settings.operator_can_edit_qty;
+    if (typeof settings?.allow_change_qty === "boolean") {
+      operatorSettings.allow_change_qty = settings.allow_change_qty;
+    }
+    if (typeof settings?.allow_remove_sku === "boolean") {
+      operatorSettings.allow_remove_sku = settings.allow_remove_sku;
+    }
+    if (typeof settings?.allow_add_from_catalog === "boolean") {
+      operatorSettings.allow_add_from_catalog = settings.allow_add_from_catalog;
+    }
+    if (typeof settings?.allow_manual_mode === "boolean") {
+      operatorSettings.allow_manual_mode = settings.allow_manual_mode;
+    }
+    if (typeof settings?.allow_skip_sku === "boolean") {
+      operatorSettings.allow_skip_sku = settings.allow_skip_sku;
     }
     if (shiftPlanSelected) {
       renderShiftPlanList(shiftPlanSelected.items);
@@ -2550,12 +2573,30 @@ document.getElementById("bedDetails").textContent =
      * - плюс/минус обновляются в renderShiftPlanList.
      */
     const hasSelection = !!shiftPlanSelectedSku;
-    const reorderAllowed = operatorSettings.operator_can_reorder && hasSelection;
+    const reorderAllowed = operatorSettings.allow_reorder_queue && hasSelection;
     if (btnShiftPlanMoveUp) {
       setActionPillDisabled(btnShiftPlanMoveUp, !reorderAllowed);
     }
     if (btnShiftPlanMoveDown) {
       setActionPillDisabled(btnShiftPlanMoveDown, !reorderAllowed);
+    }
+    if (btnShiftPlanSkip) {
+      setActionPillDisabled(btnShiftPlanSkip, !operatorSettings.allow_skip_sku || !hasSelection);
+    }
+    if (btnShiftPlanRemoveSelected) {
+      setActionPillDisabled(
+        btnShiftPlanRemoveSelected,
+        !operatorSettings.allow_remove_sku || !hasSelection
+      );
+    }
+    if (btnShiftPlanAdd) {
+      setActionPillDisabled(btnShiftPlanAdd, !operatorSettings.allow_add_from_catalog);
+    }
+    if (shiftPlanSkuInput) {
+      shiftPlanSkuInput.disabled = !operatorSettings.allow_add_from_catalog;
+    }
+    if (shiftPlanQtyInput) {
+      shiftPlanQtyInput.disabled = !operatorSettings.allow_add_from_catalog;
     }
   }
 
@@ -2671,6 +2712,10 @@ document.getElementById("bedDetails").textContent =
      * Добавляем SKU в активный план.
      * Если план ещё не выбран — создаём новый, чтобы оператор мог работать сразу.
      */
+    if (!operatorSettings.allow_add_from_catalog) {
+      showPackToast("Добавление SKU отключено настройками мастера.");
+      return;
+    }
     const sku = (shiftPlanSkuInput.value || "").trim();
     const qty = Math.max(1, parseInt(shiftPlanQtyInput.value || "1", 10));
     if (!sku) {
@@ -2711,6 +2756,10 @@ document.getElementById("bedDetails").textContent =
       showPackToast("Выберите строку в списке, чтобы удалить.");
       return;
     }
+    if (!operatorSettings.allow_remove_sku) {
+      showPackToast("Удаление SKU отключено настройками мастера.");
+      return;
+    }
     shiftPlanSelected.items = shiftPlanSelected.items.filter((item) => item.sku !== shiftPlanSelectedSku);
     shiftPlanSelectedSku = null;
     saveShiftPlansToStorage();
@@ -2726,7 +2775,7 @@ document.getElementById("bedDetails").textContent =
      * - оператор может оперативно поменять приоритеты;
      * - движение строго на одну позицию, чтобы избежать ошибок.
      */
-    if (!operatorSettings.operator_can_reorder) {
+    if (!operatorSettings.allow_reorder_queue) {
       showPackToast("Изменение порядка отключено настройками мастера.");
       return;
     }
@@ -3261,6 +3310,7 @@ function mkModalBtn(text, kind, onClick) {
   const btnShiftPlanRemoveSelected = document.getElementById("btnShiftPlanRemoveSelected");
   const btnShiftPlanMoveUp = document.getElementById("btnShiftPlanMoveUp");
   const btnShiftPlanMoveDown = document.getElementById("btnShiftPlanMoveDown");
+  const btnShiftPlanSkip = document.getElementById("btnShiftPlanSkip");
   const btnShiftPlanImport = document.getElementById("btnShiftPlanImport");
   const shiftPlanImportFile = document.getElementById("shiftPlanImportFile");
   const shiftPlanSkuInput = document.getElementById("shiftPlanSkuInput");
@@ -3357,6 +3407,10 @@ function mkModalBtn(text, kind, onClick) {
        * чтобы не провоцировать оператора на ручные действия.
        * Супервайзер осознанно раскрывает этот блок при необходимости.
        */
+      if (!operatorSettings.allow_manual_mode) {
+        showPackToast("Ручной режим отключён настройками мастера.");
+        return;
+      }
       manualControls.classList.toggle("open");
       manualModeEnabled = manualControls.classList.contains("open");
       if (shiftPlanSelected) {
@@ -3397,6 +3451,25 @@ function mkModalBtn(text, kind, onClick) {
   }
   if (btnShiftPlanMoveDown) {
     btnShiftPlanMoveDown.addEventListener("click", () => moveSelectedSku(1));
+  }
+  if (btnShiftPlanSkip) {
+    btnShiftPlanSkip.addEventListener("click", () => {
+      /**
+       * Пропуск SKU — это безопасное перемещение в конец списка.
+       * Мы не удаляем позицию, а просто меняем её приоритет.
+       */
+      if (!shiftPlanSelected || !shiftPlanSelectedSku) return;
+      if (!operatorSettings.allow_skip_sku) {
+        showPackToast("Пропуск SKU отключён настройками мастера.");
+        return;
+      }
+      const items = shiftPlanSelected.items;
+      const index = items.findIndex((item) => item.sku === shiftPlanSelectedSku);
+      if (index < 0) return;
+      const [item] = items.splice(index, 1);
+      items.push(item);
+      renderShiftPlanList(items);
+    });
   }
   if (btnShiftPlanRename) {
     btnShiftPlanRename.addEventListener("click", () => renameShiftPlan());
