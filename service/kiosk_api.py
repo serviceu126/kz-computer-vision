@@ -402,60 +402,58 @@ MAX_SHIFT_PLAN_ROWS = 500
 
 def normalize_sku_code(raw: str, catalog_map: dict) -> tuple[str | None, str | None]:
     """
-    Нормализуем SKU так, чтобы он совпал с ключами каталога.
+    Нормализуем SKU строго к каноническому формату.
 
-    Учительская логика:
-    - сначала проверяем точное совпадение;
-    - затем мягко пробуем варианты (убрать префикс, заменить точки на дефисы);
-    - если каталога нет, возвращаем сырой SKU и не ругаемся.
+    Канон: MM.Кровать.NNN-NN.Модель.XX
+    Разрешаем только мягкие исправления:
+    - добавить префикс MM.Кровать.;
+    - заменить дефис перед цветом на точку;
+    - исправить длину цвета (7 -> 07, 007 -> 07 при безопасном случае).
     """
     sku_raw = (raw or "").strip()
     if not sku_raw:
         return None, "SKU пустой после очистки."
-    if not catalog_map:
-        return sku_raw, None
 
-    catalog_keys = set(catalog_map.keys())
-    seen: set[str] = set()
-    candidates: list[str] = []
-
-    def add_candidate(value: str) -> None:
-        cleaned = (value or "").strip()
-        if not cleaned:
-            return
-        # Учительская подсказка: приводим повторяющиеся разделители к одному.
-        cleaned = re.sub(r"[.]{2,}", ".", cleaned)
-        cleaned = re.sub(r"[-]{2,}", "-", cleaned)
-        if cleaned in seen:
-            return
-        seen.add(cleaned)
-        candidates.append(cleaned)
+    # Учительская подсказка: убираем пробелы внутри строки, чтобы избежать скрытых ошибок.
+    sku_raw = sku_raw.replace(" ", "")
 
     prefix = "MM.Кровать."
-    add_candidate(sku_raw)
+    if not sku_raw.startswith(prefix):
+        sku_raw = prefix + sku_raw.lstrip(".")
 
-    if sku_raw.startswith(prefix):
-        add_candidate(sku_raw[len(prefix) :])
+    # Учительская подсказка: приводим повторяющиеся разделители к одному.
+    sku_raw = re.sub(r"[.]{2,}", ".", sku_raw)
+    sku_raw = re.sub(r"[-]{2,}", "-", sku_raw)
 
-    if "." in sku_raw:
-        last_dot = sku_raw.rfind(".")
-        add_candidate(sku_raw[:last_dot] + "-" + sku_raw[last_dot + 1 :])
+    # Если цвет записан через дефис, заменяем последний дефис на точку.
+    if re.search(r"-\d{1,3}$", sku_raw) and not re.search(r"\.\d{1,3}$", sku_raw):
+        last_dash = sku_raw.rfind("-")
+        sku_raw = sku_raw[:last_dash] + "." + sku_raw[last_dash + 1 :]
 
-    if sku_raw.startswith(prefix):
-        stripped = sku_raw[len(prefix) :]
-        if "." in stripped:
-            last_dot = stripped.rfind(".")
-            add_candidate(stripped[:last_dot] + "-" + stripped[last_dot + 1 :])
+    pattern = re.compile(r"^MM\.Кровать\.(\d{3}-\d{2,3})\.([A-Za-z0-9]+)\.(\d{1,3})$")
+    match = pattern.match(sku_raw)
+    if not match:
+        return None, "Неверный формат SKU, ожидается MM.Кровать.001-16.VelutaLux.07."
 
-    add_candidate(sku_raw.replace(".", "-"))
-    if sku_raw.startswith(prefix):
-        add_candidate(sku_raw[len(prefix) :].replace(".", "-"))
+    size_part, model_part, color_part = match.groups()
 
-    for candidate in candidates:
-        if candidate in catalog_keys:
-            return candidate, None
+    if len(color_part) == 1:
+        color_part = color_part.zfill(2)
+    elif len(color_part) == 2:
+        pass
+    elif len(color_part) == 3 and color_part.startswith("0"):
+        # Учительская подсказка: 007 -> 07, но только если лидирующий ноль.
+        color_part = color_part[1:]
+    else:
+        return None, "Цвет должен быть двумя цифрами (пример: .07)."
 
-    return None, "SKU не найден в каталоге после нормализации."
+    normalized = f"{prefix}{size_part}.{model_part}.{color_part}"
+
+    # Если каталог есть и SKU не найден, это не ошибка формата, а предупреждение.
+    if catalog_map and normalized not in catalog_map:
+        return normalized, "SKU отсутствует в каталоге."
+
+    return normalized, None
 
 
 def parse_shift_plan_csv_file(text: str) -> tuple[list[dict], list[str]]:
@@ -1269,7 +1267,7 @@ async def shift_plan_import(file: UploadFile = File(...)):
     if not plan_name:
         plan_name = "Сменное задание"
 
-    # Учительская подсказка: загружаем активный каталог и нормализуем SKU под него.
+    # Учительская подсказка: загружаем активный каталог и нормализуем SKU под канон.
     catalog_items = list_sku_catalog(include_inactive=False)
     catalog_map = {row["sku_code"]: row for row in catalog_items}
 
@@ -1278,11 +1276,13 @@ async def shift_plan_import(file: UploadFile = File(...)):
     items_for_storage: list[dict] = []
     for item in items:
         raw_code = item["sku_code"]
-        normalized_code, _reason = normalize_sku_code(raw_code, catalog_map)
-        if normalized_code:
-            sku_code = normalized_code
-        else:
-            sku_code = raw_code.strip()
+        normalized_code, reason = normalize_sku_code(raw_code, catalog_map)
+        if not normalized_code:
+            errors.append(f"SKU '{raw_code}': {reason}")
+            continue
+
+        sku_code = normalized_code
+        if catalog_map and sku_code not in catalog_map:
             unknown_skus.append(raw_code.strip())
 
         sku_meta = catalog_map.get(sku_code) or {}
@@ -1294,6 +1294,9 @@ async def shift_plan_import(file: UploadFile = File(...)):
             }
         )
         items_for_storage.append({"sku_code": sku_code, "qty": int(item["qty"])})
+
+    if errors:
+        return JSONResponse(status_code=400, content={"errors": errors})
 
     # Убираем дубликаты, чтобы предупреждение было коротким и понятным.
     unknown_skus = list(dict.fromkeys([sku for sku in unknown_skus if sku]))

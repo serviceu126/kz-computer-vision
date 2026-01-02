@@ -296,6 +296,13 @@ body:not(.is-master-active) .screen--master {
   margin-top: var(--space-2xs);
 }
 
+.shift-plan-sku-hint {
+  /* Учительский комментарий: мягко напоминаем оператору канонический формат. */
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-2xs);
+}
+
 .reports-stub {
   display: flex;
   flex-direction: column;
