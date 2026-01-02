@@ -5,6 +5,7 @@
   const API_MASTER_LOGOUT_URL = "/api/kiosk/master/logout";
   const API_SETTINGS_URL = "/api/kiosk/settings";
   const API_SKU_URL = "/api/kiosk/sku";
+  const API_SKU_CATALOG_URL = "/api/kiosk/sku_catalog";
   const API_REPORT_PREVIEW_URL = "/api/kiosk/reports/preview";
   const API_REPORT_EXPORT_URL = "/api/kiosk/reports/export";
   const API_REPORT_USB_URL = "/api/kiosk/reports/save_to_usb";
@@ -73,6 +74,62 @@
   let skuModalOpen = false;
   let skuModalMode = "create";
   let skuEditingId = null;
+  // Учительская заметка: каталог SKU нужен всему UI, поэтому держим его в window.
+  window.kzSkuCatalog = Array.isArray(window.kzSkuCatalog) ? window.kzSkuCatalog : [];
+
+  function normalizeSkuCode(value) {
+    /**
+     * Пояснение учителя: приводим SKU к строке,
+     * чтобы сравнение не ломалось из-за null/undefined.
+     */
+    return (value || "").toString().trim();
+  }
+
+  window.findSku = (code) => {
+    /**
+     * Учительская подсказка: быстрый поиск SKU по точному совпадению.
+     */
+    const normalized = normalizeSkuCode(code);
+    if (!normalized) return null;
+    return (window.kzSkuCatalog || []).find((item) => item.sku_code === normalized) || null;
+  };
+
+  window.filterSku = (query) => {
+    /**
+     * Учительская подсказка: фильтруем по коду и названию,
+     * чтобы поиск работал и по SKU, и по человекочитаемому названию.
+     */
+    const needle = normalizeSkuCode(query).toLowerCase();
+    const catalog = (window.kzSkuCatalog || []).filter((item) => item.is_active !== false);
+    if (!needle) return catalog;
+    return catalog.filter((item) => {
+      const code = normalizeSkuCode(item.sku_code).toLowerCase();
+      const name = normalizeSkuCode(item.name).toLowerCase();
+      return code.includes(needle) || name.includes(needle);
+    });
+  };
+
+  async function loadSkuCatalog() {
+    /**
+     * Учительская подсказка: загружаем каталог SKU без мастер-режима,
+     * чтобы очередь сразу показывала актуальные данные.
+     */
+    try {
+      const resp = await fetch(API_SKU_CATALOG_URL, { cache: "no-store" });
+      if (!resp.ok) {
+        return;
+      }
+      const data = await resp.json();
+      window.kzSkuCatalog = Array.isArray(data.items) ? data.items : [];
+      if (typeof window.onSkuCatalogLoaded === "function") {
+        window.onSkuCatalogLoaded(window.kzSkuCatalog);
+      }
+    } catch (error) {
+      console.warn("Не удалось загрузить каталог SKU:", error);
+    }
+  }
+  // Учительская подсказка: отдаём функцию наружу, чтобы UI мог обновлять каталог при необходимости.
+  window.loadSkuCatalog = loadSkuCatalog;
 
   function setMasterUi(masterId) {
     /**
@@ -1008,6 +1065,8 @@
   updateSettingsAvailability();
   renderTabs({ master_active: !!currentMasterId });
   fetchSettings();
+  // Учительская подсказка: каталог для очереди загружаем всегда, не только в мастер-режиме.
+  loadSkuCatalog();
   fetchSkuCatalog();
   setReportDefaultDates();
 })();

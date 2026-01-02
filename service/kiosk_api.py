@@ -1159,6 +1159,28 @@ async def sku_list(
     return {"status": "ok", "items": items}
 
 
+@app.get("/api/kiosk/sku_catalog")
+async def sku_catalog_list():
+    """
+    Возвращает базовый список SKU для операторского UI.
+
+    Учительский акцент:
+    - здесь не требуется мастер-режим, потому что данные только для выбора;
+    - отдаём минимум полей, чтобы ответ был лёгким и быстрым.
+    """
+    items = list_sku_catalog(include_inactive=False)
+    return {
+        "items": [
+            {
+                "sku_code": item.get("sku_code"),
+                "name": item.get("name"),
+                "is_active": bool(item.get("is_active")),
+            }
+            for item in items
+        ]
+    }
+
+
 @app.post("/api/kiosk/sku")
 async def sku_create(payload: SkuCreateRequest):
     """
