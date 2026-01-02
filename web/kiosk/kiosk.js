@@ -9,7 +9,9 @@
   const API_REPORT_PREVIEW_URL = "/api/kiosk/reports/preview";
   const API_REPORT_EXPORT_URL = "/api/kiosk/reports/export";
   const API_REPORT_USB_URL = "/api/kiosk/reports/save_to_usb";
-  const API_SHIFT_PLAN_IMPORT_URL = "/api/kiosk/shift_plan/import_csv";
+  const API_REPORT_SHIFT_CSV_URL = "/api/kiosk/reports/shift.csv";
+  const API_REPORT_WORKERS_CSV_URL = "/api/kiosk/reports/workers.csv";
+  const API_SHIFT_PLAN_IMPORT_URL = "/api/kiosk/shift_plan/import";
 
   // UI-элементы мастера: кнопки, модалка, статус.
   const btnMasterLogin = document.getElementById("btnMasterLogin");
@@ -64,6 +66,9 @@
   const btnReportDownloadXlsx = document.getElementById("btnReportDownloadXlsx");
   const btnReportUsbCsv = document.getElementById("btnReportUsbCsv");
   const btnReportUsbXlsx = document.getElementById("btnReportUsbXlsx");
+  const reportDateCsv = document.getElementById("reportDateCsv");
+  const btnReportShiftCsv = document.getElementById("btnReportShiftCsv");
+  const btnReportWorkersCsv = document.getElementById("btnReportWorkersCsv");
 
   let masterModalOpen = false;
   let currentMasterId = null;
@@ -308,9 +313,9 @@
     }
   }
 
-  window.importShiftPlanCsv = async (file) => {
+  window.importShiftPlanFile = async (file) => {
     /**
-     * Импорт сменного задания в мастер-режиме.
+     * Импорт сменного задания в мастер-режиме (CSV или JSON).
      *
      * Мы отправляем файл на backend и показываем итог:
      * - успех: "Импортировано N позиций";
@@ -332,7 +337,7 @@
       }
 
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) {
+      if (!resp.ok) {
         const errors = Array.isArray(data.errors) ? data.errors : [];
         if (errors.length) {
           const shown = errors.slice(0, 10).map((err) => String(err));
@@ -347,14 +352,16 @@
         return;
       }
 
-      const importedCount = Number.isFinite(data.imported_count) ? data.imported_count : 0;
+      const importedCount = Number.isFinite(data.total_items) ? data.total_items : 0;
       window.showPackToast?.(`Импортировано ${importedCount} позиций`);
 
-      if (typeof window.syncQueueFromBackend === "function") {
+      if (typeof window.refreshShiftPlanFromBackend === "function") {
+        await window.refreshShiftPlanFromBackend();
+      } else if (typeof window.syncQueueFromBackend === "function") {
         await window.syncQueueFromBackend();
       }
     } catch (error) {
-      window.showPackToast?.("Ошибка сети: CSV не импортирован.");
+      window.showPackToast?.("Ошибка сети: файл не импортирован.");
     }
   };
 
@@ -696,6 +703,21 @@
     window.location.href = url.toString();
   }
 
+  function triggerSimpleCsvDownload(urlBase) {
+    /**
+     * Учительская подсказка: минимальный CSV скачиваем одной ссылкой.
+     */
+    if (!currentMasterId) return;
+    const dateValue = reportDateCsv?.value || "";
+    if (!dateValue) {
+      window.showPackToast?.("Выберите дату отчёта.");
+      return;
+    }
+    const url = new URL(urlBase, window.location.origin);
+    url.searchParams.set("date", dateValue);
+    window.location.href = url.toString();
+  }
+
   async function saveReportToUsb(format) {
     /**
      * Просим backend сохранить отчёт на USB и возвращаем путь.
@@ -740,6 +762,9 @@
     }
     if (reportDateTo && !reportDateTo.value) {
       reportDateTo.value = today;
+    }
+    if (reportDateCsv && !reportDateCsv.value) {
+      reportDateCsv.value = today;
     }
   }
 
@@ -1059,6 +1084,12 @@
   }
   if (btnReportUsbXlsx) {
     btnReportUsbXlsx.addEventListener("click", () => saveReportToUsb("xlsx"));
+  }
+  if (btnReportShiftCsv) {
+    btnReportShiftCsv.addEventListener("click", () => triggerSimpleCsvDownload(API_REPORT_SHIFT_CSV_URL));
+  }
+  if (btnReportWorkersCsv) {
+    btnReportWorkersCsv.addEventListener("click", () => triggerSimpleCsvDownload(API_REPORT_WORKERS_CSV_URL));
   }
 
   // Стартовая синхронизация настроек.

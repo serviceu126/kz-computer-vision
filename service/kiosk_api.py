@@ -1,13 +1,14 @@
 from pathlib import Path
 from typing import List, Optional, Literal
+from datetime import datetime
 import re
 import importlib.util
 import json
 import time
 import sqlite3
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import csv
@@ -21,6 +22,11 @@ from core.storage import (
     get_active_shift_id,
     get_shift_plan,
     list_shift_plans,
+    create_shift_plan_with_items,
+    get_active_shift_plan,
+    set_active_shift_plan,
+    clear_active_shift_plan,
+    get_sku_catalog_map,
     get_kiosk_setting,
     get_kiosk_settings,
     set_kiosk_setting,
@@ -189,6 +195,10 @@ class ShiftPlanUploadRequest(BaseModel):
 
 
 class ShiftPlanSelectRequest(BaseModel):
+    plan_id: int
+
+
+class ShiftPlanActivateRequest(BaseModel):
     plan_id: int
 
 
@@ -385,6 +395,149 @@ def detect_csv_delimiter(sample_line: str) -> str:
     best = max(counts, key=counts.get)
     return best if counts[best] > 0 else ","
 
+
+MAX_SHIFT_PLAN_ROWS = 500
+
+
+def parse_shift_plan_csv_file(text: str) -> tuple[list[dict], list[str]]:
+    """
+    Парсим CSV-файл сменного задания.
+
+    Что важно:
+    - принимаем ';' и ',' как разделители;
+    - первая строка может быть заголовком;
+    - пустые строки пропускаем;
+    - количество строк ограничиваем, чтобы не перегружать киоск.
+    """
+    errors: list[str] = []
+    items: list[dict] = []
+
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return [], ["Файл пуст или не содержит данных."]
+
+    delimiter = detect_csv_delimiter(lines[0])
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    rows = list(reader)
+    if not rows:
+        return [], ["Файл пуст или не содержит данных."]
+
+    header = [cell.strip().lower() for cell in rows[0]]
+    has_header = any(cell in ("sku", "sku_code", "артикул") for cell in header)
+    start_index = 1 if has_header else 0
+
+    for row_index, row in enumerate(rows[start_index:], start=start_index + 1):
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        if len(items) >= MAX_SHIFT_PLAN_ROWS:
+            errors.append("Превышен лимит: максимум 500 строк.")
+            break
+
+        sku_code = (row[0] if len(row) > 0 else "").strip()
+        qty_raw = (row[1] if len(row) > 1 else "").strip()
+        if not sku_code:
+            errors.append(f"Строка {row_index}: SKU не указан.")
+            continue
+        if qty_raw:
+            try:
+                qty = int(qty_raw)
+            except ValueError:
+                errors.append(f"Строка {row_index}: количество '{qty_raw}' не является числом.")
+                continue
+        else:
+            qty = 1
+        if qty <= 0:
+            errors.append(f"Строка {row_index}: количество должно быть больше нуля.")
+            continue
+
+        items.append({"sku_code": sku_code, "qty": qty})
+
+    return items, errors
+
+
+def parse_shift_plan_json_file(text: str) -> tuple[str, list[dict], list[str]]:
+    """
+    Парсим JSON-файл сменного задания.
+
+    Формат:
+    { "plan_name": "...", "items": [ {"sku_code": "...", "qty": 3}, ... ] }
+    """
+    errors: list[str] = []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return "", [], ["JSON не распознан: проверьте формат файла."]
+
+    if not isinstance(payload, dict):
+        return "", [], ["JSON должен содержать объект с полями plan_name и items."]
+
+    plan_name = str(payload.get("plan_name") or "").strip()
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        return plan_name, [], ["Поле items должно быть списком."]
+
+    if len(raw_items) > MAX_SHIFT_PLAN_ROWS:
+        return plan_name, [], ["Превышен лимит: максимум 500 строк."]
+
+    items: list[dict] = []
+    for index, raw in enumerate(raw_items, start=1):
+        if not isinstance(raw, dict):
+            errors.append(f"Строка {index}: элемент должен быть объектом.")
+            continue
+        sku_code = str(raw.get("sku_code") or "").strip()
+        qty_raw = raw.get("qty", 1)
+        if not sku_code:
+            errors.append(f"Строка {index}: SKU не указан.")
+            continue
+        try:
+            qty = int(qty_raw)
+        except (TypeError, ValueError):
+            errors.append(f"Строка {index}: количество '{qty_raw}' не является числом.")
+            continue
+        if qty <= 0:
+            errors.append(f"Строка {index}: количество должно быть больше нуля.")
+            continue
+        items.append({"sku_code": sku_code, "qty": qty})
+
+    return plan_name, items, errors
+
+
+def build_csv_response(rows: list[dict], headers: list[str]) -> PlainTextResponse:
+    """
+    Формируем CSV-ответ без Excel-зависимостей.
+
+    Почему так:
+    - CSV читается Excel/LibreOffice;
+    - не тянем тяжёлые библиотеки на сервере.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([row.get(key, "") for key in headers])
+    return PlainTextResponse(buffer.getvalue(), media_type="text/csv; charset=utf-8")
+
+
+def parse_report_date(date_str: str) -> tuple[float, float]:
+    """
+    Преобразуем YYYY-MM-DD в диапазон таймштампов.
+    """
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Ожидается дата в формате YYYY-MM-DD.") from exc
+    start = datetime(date_obj.year, date_obj.month, date_obj.day, 0, 0, 0)
+    end = datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, 59)
+    return start.timestamp(), end.timestamp()
+
+
+def format_timestamp(ts_value: float | None) -> str:
+    """
+    Делаем понятный текст времени для CSV.
+    """
+    if not ts_value:
+        return ""
+    return datetime.fromtimestamp(ts_value).strftime("%Y-%m-%d %H:%M:%S")
 
 def parse_shift_plan_csv(
     text: str,
@@ -963,6 +1116,148 @@ async def shift_plan_import_csv(request: Request):
     return {"ok": True, "imported_count": len(items), "errors": []}
 
 
+@app.get("/api/kiosk/shift_plan")
+async def shift_plan_get():
+    """
+    Возвращает активный сменный план или пустой ответ.
+    """
+    plan = get_active_shift_plan()
+    if not plan:
+        return {"plan": None}
+
+    sku_codes = [item["sku_code"] for item in plan.get("items", [])]
+    sku_map = get_sku_catalog_map(sku_codes)
+    unknown_skus = [sku for sku in sku_codes if sku not in sku_map]
+    normalized_items = []
+    for item in plan.get("items", []):
+        sku_code = item["sku_code"]
+        sku_meta = sku_map.get(sku_code) or {}
+        normalized_items.append(
+            {
+                "sku_code": sku_code,
+                "qty": int(item["qty"]),
+                "position": int(item["position"]),
+                "name": sku_meta.get("name"),
+            }
+        )
+
+    return {
+        "plan": {
+            "id": plan["id"],
+            "plan_name": plan["name"],
+            "created_at": plan["created_at"],
+            "items": normalized_items,
+        },
+        "unknown_skus": unknown_skus,
+    }
+
+
+@app.post("/api/kiosk/shift_plan/import")
+async def shift_plan_import(file: UploadFile = File(...)):
+    """
+    Импорт сменного задания из CSV или JSON (только мастер).
+
+    Мы принимаем файл и сразу активируем план,
+    чтобы оператор видел актуальный список без дополнительных шагов.
+    """
+    ensure_master_mode()
+    update_master_activity()
+
+    # Проверяем наличие python-multipart только при попытке импорта,
+    # чтобы сервер мог запускаться без дополнительной зависимости.
+    if importlib.util.find_spec("multipart") is None:
+        raise HTTPException(
+            status_code=501,
+            detail="Загрузка файлов недоступна: нужен python-multipart.",
+        )
+
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="Файл не найден в запросе.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Файл пуст.")
+
+    filename = file.filename.lower()
+    text = content.decode("utf-8-sig", errors="replace")
+    items: list[dict] = []
+    errors: list[str] = []
+    plan_name = ""
+
+    if filename.endswith(".json") or "application/json" in (file.content_type or ""):
+        plan_name, items, errors = parse_shift_plan_json_file(text)
+    else:
+        items, errors = parse_shift_plan_csv_file(text)
+
+    if errors:
+        return JSONResponse(status_code=400, content={"errors": errors})
+    if not items:
+        return JSONResponse(status_code=400, content={"errors": ["Нет валидных строк."]})
+
+    if not plan_name:
+        plan_name = (Path(file.filename).stem or "Сменное задание").strip()
+    if not plan_name:
+        plan_name = "Сменное задание"
+
+    sku_codes = [item["sku_code"] for item in items]
+    sku_map = get_sku_catalog_map(sku_codes)
+    unknown_skus = [sku for sku in sku_codes if sku not in sku_map]
+    normalized_items = []
+    for item in items:
+        sku_meta = sku_map.get(item["sku_code"]) or {}
+        normalized_items.append(
+            {
+                "sku_code": item["sku_code"],
+                "qty": int(item["qty"]),
+                "name": sku_meta.get("name"),
+            }
+        )
+
+    # Если смены нет, сохраняем с нулевым shift_id,
+    # чтобы мастер всё равно мог подготовить план заранее.
+    shift_id = get_active_shift_id() or 0
+    plan_id = create_shift_plan_with_items(
+        shift_id=shift_id,
+        name=plan_name,
+        created_at=time.time(),
+        items=items,
+    )
+
+    return {
+        "plan_id": plan_id,
+        "plan_name": plan_name,
+        "total_items": len(items),
+        "unknown_skus": unknown_skus,
+        "normalized_items": normalized_items,
+    }
+
+
+@app.post("/api/kiosk/shift_plan/activate")
+async def shift_plan_activate(payload: ShiftPlanActivateRequest):
+    """
+    Активируем выбранный план (только мастер).
+    """
+    ensure_master_mode()
+    update_master_activity()
+
+    row = get_shift_plan(payload.plan_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="План не найден.")
+    set_active_shift_plan(payload.plan_id)
+    return {"status": "ok", "plan_id": payload.plan_id}
+
+
+@app.post("/api/kiosk/shift_plan/clear")
+async def shift_plan_clear():
+    """
+    Очищаем активный план (только мастер).
+    """
+    ensure_master_mode()
+    update_master_activity()
+    clear_active_shift_plan()
+    return {"status": "ok"}
+
+
 @app.get("/api/kiosk/pack/plan/list")
 async def pack_plan_list():
     """
@@ -1218,6 +1513,98 @@ async def sku_update(sku_id: int, payload: SkuUpdateRequest):
         is_active=1 if payload.is_active else (0 if payload.is_active is False else None),
     )
     return {"status": "ok"}
+
+
+@app.get("/api/kiosk/reports/shift.csv")
+async def report_shift_csv(date: str = Query(...)):
+    """
+    Заглушка отчёта по смене (CSV).
+
+    Важно:
+    - отдаём простой CSV, чтобы не тянуть Excel-зависимости;
+    - если данных нет, возвращаем только заголовок.
+    """
+    ensure_master_mode()
+    update_master_activity()
+
+    start_ts, end_ts = parse_report_date(date)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, work_center, start_time, end_time
+           FROM worker_shifts
+           WHERE start_time >= ? AND start_time <= ?
+           ORDER BY start_time ASC""",
+        [start_ts, end_ts],
+    )
+    shift_rows = cur.fetchall() or []
+
+    rows: list[dict] = []
+    for row in shift_rows:
+        cur.execute(
+            "SELECT COUNT(*) AS packed_count FROM sessions WHERE shift_id=?",
+            [int(row["id"])],
+        )
+        packed_count = int((cur.fetchone() or {"packed_count": 0})["packed_count"])
+        rows.append(
+            {
+                "shift_id": int(row["id"]),
+                "shift_label": row["work_center"],
+                "start_time": format_timestamp(row["start_time"]),
+                "end_time": format_timestamp(row["end_time"]),
+                "packed_count": packed_count,
+                "idle_minutes": 0,
+            }
+        )
+    conn.close()
+    headers = ["shift_id", "shift_label", "start_time", "end_time", "packed_count", "idle_minutes"]
+    return build_csv_response(rows, headers)
+
+
+@app.get("/api/kiosk/reports/workers.csv")
+async def report_workers_csv(date: str = Query(...)):
+    """
+    Заглушка отчёта по сотрудникам (CSV).
+    """
+    ensure_master_mode()
+    update_master_activity()
+
+    start_ts, end_ts = parse_report_date(date)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT worker_id,
+                  SUM(worktime_sec) AS total_work_seconds,
+                  SUM(downtime_sec) AS total_idle_seconds,
+                  COUNT(*) AS packed_count
+           FROM sessions
+           WHERE start_time >= ? AND start_time <= ?
+           GROUP BY worker_id
+           ORDER BY worker_id ASC""",
+        [start_ts, end_ts],
+    )
+    worker_rows = cur.fetchall() or []
+    rows = []
+    for row in worker_rows:
+        worker_id = row["worker_id"]
+        rows.append(
+            {
+                "worker_id": worker_id,
+                "worker_name": worker_id,
+                "total_work_seconds": int(row["total_work_seconds"] or 0),
+                "total_idle_seconds": int(row["total_idle_seconds"] or 0),
+                "packed_count": int(row["packed_count"] or 0),
+            }
+        )
+    conn.close()
+    headers = [
+        "worker_id",
+        "worker_name",
+        "total_work_seconds",
+        "total_idle_seconds",
+        "packed_count",
+    ]
+    return build_csv_response(rows, headers)
 
 
 @app.get("/api/kiosk/reports/preview")
