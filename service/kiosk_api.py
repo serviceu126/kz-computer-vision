@@ -32,6 +32,11 @@ from core.storage import (
     update_sku_catalog_item,
     get_report_rows,
     get_active_sku_codes,
+    list_queue_items,
+    add_or_update_queue_item,
+    update_queue_qty,
+    remove_queue_item,
+    reorder_queue_items,
 )
 from services.packaging import (
     advance_phase,
@@ -224,6 +229,19 @@ class ReportSaveRequest(BaseModel):
     format: Literal["csv", "xlsx"]
 
 
+class QueueAddRequest(BaseModel):
+    sku_code: str
+    qty: int = 1
+
+
+class QueueUpdateRequest(BaseModel):
+    qty: int
+
+
+class QueueReorderRequest(BaseModel):
+    item_ids: List[int]
+
+
 def update_master_activity():
     # Фиксируем время последнего действия мастера в базе.
     # Так таймаут считается устойчиво, даже после перезапуска сервиса.
@@ -272,6 +290,29 @@ def ensure_master_mode() -> dict:
     if not session.get("enabled"):
         raise HTTPException(status_code=403, detail="Доступно только в мастер-режиме.")
     return session
+
+
+def is_master_active() -> bool:
+    """
+    Проверяем, активен ли мастер-режим.
+
+    Это нужно для разграничения прав оператора и мастера.
+    """
+    session = get_master_session()
+    return bool(session.get("enabled"))
+
+
+def ensure_queue_permission(setting_key: str) -> None:
+    """
+    Проверяем право на изменение очереди.
+
+    Мастер всегда может, оператор — только если разрешено настройкой.
+    """
+    ensure_master_session_alive()
+    if is_master_active():
+        return
+    if get_kiosk_setting(setting_key, 0) != 1:
+        raise HTTPException(status_code=403, detail="Операция запрещена настройками мастера.")
 
 
 def validate_report_params(report_type: str, date_from: str, date_to: str) -> None:
@@ -1134,6 +1175,65 @@ async def report_save_to_usb(payload: ReportSaveRequest):
         content = build_report_csv(rows, headers)
     target_path.write_bytes(content)
     return {"status": "ok", "path": str(target_path)}
+
+
+@app.get("/api/kiosk/queue")
+async def queue_list():
+    """
+    Возвращает очередь SKU для отображения в UI.
+    """
+    ensure_master_session_alive()
+    items = list_queue_items()
+    return {"status": "ok", "items": items}
+
+
+@app.post("/api/kiosk/queue/items")
+async def queue_add(payload: QueueAddRequest):
+    """
+    Добавляет SKU в очередь.
+    """
+    ensure_queue_permission("operator_can_add_sku_to_shift")
+    sku_code = (payload.sku_code or "").strip()
+    if not sku_code:
+        raise HTTPException(status_code=400, detail="SKU не указан.")
+    if payload.qty <= 0:
+        raise HTTPException(status_code=400, detail="Количество должно быть больше нуля.")
+    item_id = add_or_update_queue_item(sku_code, payload.qty)
+    return {"status": "ok", "id": item_id}
+
+
+@app.patch("/api/kiosk/queue/items/{item_id}")
+async def queue_update(item_id: int, payload: QueueUpdateRequest):
+    """
+    Обновляет количество SKU в очереди.
+    """
+    ensure_queue_permission("operator_can_edit_qty")
+    if payload.qty <= 0:
+        raise HTTPException(status_code=400, detail="Количество должно быть больше нуля.")
+    update_queue_qty(item_id, payload.qty)
+    return {"status": "ok"}
+
+
+@app.post("/api/kiosk/queue/reorder")
+async def queue_reorder(payload: QueueReorderRequest):
+    """
+    Перестраивает очередь по списку id.
+    """
+    ensure_queue_permission("operator_can_reorder")
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="Список id пуст.")
+    reorder_queue_items(payload.item_ids)
+    return {"status": "ok"}
+
+
+@app.delete("/api/kiosk/queue/items/{item_id}")
+async def queue_delete(item_id: int):
+    """
+    Удаляет позицию из очереди.
+    """
+    ensure_queue_permission("operator_can_remove_sku_from_shift")
+    remove_queue_item(item_id)
+    return {"status": "ok"}
 
 
 @app.get("/api/kiosk/pack/plan")
