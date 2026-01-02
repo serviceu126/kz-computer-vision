@@ -495,6 +495,20 @@ app.mount(
     name="kiosk_static",
 )
 
+def _ensure_shift_active(shift_id: int) -> None:
+    # Проверяем, что смена ещё активна в БД.
+    # Важно: поведение и тексты ошибок должны совпадать с текущими ручными проверками.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT is_active FROM worker_shifts WHERE id=?", [shift_id])
+    row = cur.fetchone()
+    conn.close()
+    if not row or int(row["is_active"]) != 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Смена уже закрыта, таймер не может менять состояние.",
+        )
+
 
 @app.get("/", include_in_schema=False)
 async def root():
@@ -571,6 +585,31 @@ async def get_state():
         master_id=master_id,
         master_active=bool(master_id),
     )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/master/login")
@@ -691,18 +730,10 @@ async def timer_state(payload: TimerStateRequest):
             detail="Нет активной смены для текущей упаковочной сессии.",
         )
 
-    # Проверяем, что смена ещё активна в БД.
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT is_active FROM worker_shifts WHERE id=?", [shift_id])
-    row = cur.fetchone()
-    conn.close()
-    if not row or int(row["is_active"]) != 1:
-        raise HTTPException(
-            status_code=409,
-            detail="Смена уже закрыта, таймер не может менять состояние.",
-        )
+    _ensure_shift_active(shift_id)
 
+    # session_id здесь не используем: сессия сохраняется в БД только при finish,
+    # а источником истины для таймера остаётся shift_id.
     created = record_timer_state(
         shift_id=shift_id,
         session_id=None,
@@ -726,17 +757,17 @@ async def timer_heartbeat(payload: TimerHeartbeatRequest):
             detail="Нет активной смены для текущей упаковочной сессии.",
         )
 
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT is_active FROM worker_shifts WHERE id=?", [shift_id])
-    row = cur.fetchone()
-    conn.close()
-    if not row or int(row["is_active"]) != 1:
+    try:
+        _ensure_shift_active(shift_id)
+    except HTTPException:
+        # Важно: для heartbeat сохраняем прежнее сообщение об ошибке.
         raise HTTPException(
             status_code=409,
             detail="Смена уже закрыта, heartbeat не записывается.",
         )
 
+    # session_id здесь также не используется по той же причине:
+    # события таймера привязываются к смене (shift_id).
     record_heartbeat(
         shift_id=shift_id,
         session_id=None,
