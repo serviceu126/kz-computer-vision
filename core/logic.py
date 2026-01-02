@@ -82,23 +82,6 @@ class KioskUIState:
     idle_minutes: int
     heartbeat_age_sec: Optional[int]
 
-    # Новые поля для таймеров на основе событий.
-    # timer_state: текущее состояние таймера (work/idle/None)
-    # work_minutes/idle_minutes: округление вниз по минутам.
-    timer_state: Optional[str]
-    work_minutes: int
-    idle_minutes: int
-
-    # Таймерные поля на основе событий:
-    # timer_state: текущее состояние таймера (work/idle/None)
-    # work_minutes/idle_minutes: округление вниз до минут
-    # heartbeat_age_sec: возраст последнего heartbeat (секунды) или None
-    timer_state: Optional[str]
-    work_minutes: int
-    idle_minutes: int
-    heartbeat_age_sec: Optional[int]
-
-
     last_pack_seconds: int
     best_pack_seconds: int
     avg_pack_seconds: int
@@ -527,51 +510,17 @@ class KioskEngine:
             timer_state = None
             heartbeat_age_sec = None
             if shift_id_for_timer:
+                # Используем единый timestamp специально, чтобы timer_state и
+                # heartbeat_age_sec считались из одной точки времени.
+                now_dt = datetime.utcnow()
                 work_seconds, idle_seconds, timer_state = compute_work_idle_seconds(
                     shift_id_for_timer,
-                    datetime.utcnow(),
+                    now_dt,
                 )
                 heartbeat_age_sec = get_heartbeat_age_sec(
                     shift_id_for_timer,
-                    datetime.utcnow(),
+                    now_dt,
                 )
-            work_minutes = int(work_seconds // 60)
-            idle_minutes = int(idle_seconds // 60)
-
-            # Для таймера берём shift_id активной сессии (если есть),
-            # иначе — первую активную смену из списка (минимальный вариант).
-
-            # Для расчёта таймера используем shift_id активной сессии,
-            # либо первую активную смену из списка (минимальный fallback).
-
-            # Для расчёта таймера используем shift_id активной сессии,
-            # либо первую активную смену из списка (минимальный fallback).
-
-            shift_id_for_timer = None
-            if self._session and getattr(self._session, "shift_id", None):
-                shift_id_for_timer = self._session.shift_id
-            elif self._active_shifts_cache:
-                shift_id_for_timer = self._active_shifts_cache[0].get("shift_id")
-
-            work_seconds = 0
-            idle_seconds = 0
-            timer_state = None
-
-            heartbeat_age_sec = None
-
-            heartbeat_age_sec = None
-
-            if shift_id_for_timer:
-                work_seconds, idle_seconds, timer_state = compute_work_idle_seconds(
-                    shift_id_for_timer,
-                    datetime.utcnow(),
-                )
-
-                heartbeat_age_sec = get_heartbeat_age_sec(
-                    shift_id_for_timer,
-                    datetime.utcnow(),
-                )
-
             work_minutes = int(work_seconds // 60)
             idle_minutes = int(idle_seconds // 60)
 

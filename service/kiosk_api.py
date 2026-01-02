@@ -404,6 +404,20 @@ app.mount(
     name="kiosk_static",
 )
 
+def _ensure_shift_active(shift_id: int) -> None:
+    # Проверяем, что смена ещё активна в БД.
+    # Важно: поведение и тексты ошибок должны совпадать с текущими ручными проверками.
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT is_active FROM worker_shifts WHERE id=?", [shift_id])
+    row = cur.fetchone()
+    conn.close()
+    if not row or int(row["is_active"]) != 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Смена уже закрыта, таймер не может менять состояние.",
+        )
+
 
 @app.get("/", include_in_schema=False)
 async def root():
@@ -600,18 +614,10 @@ async def timer_state(payload: TimerStateRequest):
             detail="Нет активной смены для текущей упаковочной сессии.",
         )
 
-    # Проверяем, что смена ещё активна в БД.
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT is_active FROM worker_shifts WHERE id=?", [shift_id])
-    row = cur.fetchone()
-    conn.close()
-    if not row or int(row["is_active"]) != 1:
-        raise HTTPException(
-            status_code=409,
-            detail="Смена уже закрыта, таймер не может менять состояние.",
-        )
+    _ensure_shift_active(shift_id)
 
+    # session_id здесь не используем: сессия сохраняется в БД только при finish,
+    # а источником истины для таймера остаётся shift_id.
     created = record_timer_state(
         shift_id=shift_id,
         session_id=None,
@@ -635,17 +641,17 @@ async def timer_heartbeat(payload: TimerHeartbeatRequest):
             detail="Нет активной смены для текущей упаковочной сессии.",
         )
 
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT is_active FROM worker_shifts WHERE id=?", [shift_id])
-    row = cur.fetchone()
-    conn.close()
-    if not row or int(row["is_active"]) != 1:
+    try:
+        _ensure_shift_active(shift_id)
+    except HTTPException:
+        # Важно: для heartbeat сохраняем прежнее сообщение об ошибке.
         raise HTTPException(
             status_code=409,
             detail="Смена уже закрыта, heartbeat не записывается.",
         )
 
+    # session_id здесь также не используется по той же причине:
+    # события таймера привязываются к смене (shift_id).
     record_heartbeat(
         shift_id=shift_id,
         session_id=None,
