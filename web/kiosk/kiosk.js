@@ -969,7 +969,8 @@
           body: JSON.stringify(payload),
         });
         if (!resp.ok) {
-          window.showPackToast?.("Не удалось сохранить SKU.");
+          const detail = await resp.json().catch(() => ({}));
+          window.showPackToast?.(detail.detail || "Не удалось сохранить SKU.");
           return;
         }
         closeSkuModal();
