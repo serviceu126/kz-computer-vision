@@ -5,10 +5,13 @@
   const API_MASTER_LOGOUT_URL = "/api/kiosk/master/logout";
   const API_SETTINGS_URL = "/api/kiosk/settings";
   const API_SKU_URL = "/api/kiosk/sku";
+  const API_SKU_CATALOG_URL = "/api/kiosk/sku_catalog";
   const API_REPORT_PREVIEW_URL = "/api/kiosk/reports/preview";
   const API_REPORT_EXPORT_URL = "/api/kiosk/reports/export";
   const API_REPORT_USB_URL = "/api/kiosk/reports/save_to_usb";
-  const API_SHIFT_PLAN_IMPORT_URL = "/api/kiosk/shift_plan/import_csv";
+  const API_REPORT_SHIFT_CSV_URL = "/api/kiosk/reports/shift.csv";
+  const API_REPORT_WORKERS_CSV_URL = "/api/kiosk/reports/workers.csv";
+  const API_SHIFT_PLAN_IMPORT_URL = "/api/kiosk/shift_plan/import";
 
   // UI-элементы мастера: кнопки, модалка, статус.
   const btnMasterLogin = document.getElementById("btnMasterLogin");
@@ -31,6 +34,7 @@
   const settingCanRemoveSku = document.getElementById("allowRemoveSku");
   const settingCanAddSku = document.getElementById("allowAddFromCatalog");
   const settingCanManualMode = document.getElementById("allowManualMode");
+  const settingAllowShiftPlanImport = document.getElementById("allowShiftPlanImport");
   const settingCanSkipSku = document.getElementById("allowSkipSku");
   const settingMasterTimeout = document.getElementById("settingMasterTimeout");
   const btnSettingsSave = document.getElementById("btnSettingsSave");
@@ -63,6 +67,9 @@
   const btnReportDownloadXlsx = document.getElementById("btnReportDownloadXlsx");
   const btnReportUsbCsv = document.getElementById("btnReportUsbCsv");
   const btnReportUsbXlsx = document.getElementById("btnReportUsbXlsx");
+  const reportDateCsv = document.getElementById("reportDateCsv");
+  const btnReportShiftCsv = document.getElementById("btnReportShiftCsv");
+  const btnReportWorkersCsv = document.getElementById("btnReportWorkersCsv");
 
   let masterModalOpen = false;
   let currentMasterId = null;
@@ -73,6 +80,62 @@
   let skuModalOpen = false;
   let skuModalMode = "create";
   let skuEditingId = null;
+  // Учительская заметка: каталог SKU нужен всему UI, поэтому держим его в window.
+  window.kzSkuCatalog = Array.isArray(window.kzSkuCatalog) ? window.kzSkuCatalog : [];
+
+  function normalizeSkuCode(value) {
+    /**
+     * Пояснение учителя: приводим SKU к строке,
+     * чтобы сравнение не ломалось из-за null/undefined.
+     */
+    return (value || "").toString().trim();
+  }
+
+  window.findSku = (code) => {
+    /**
+     * Учительская подсказка: быстрый поиск SKU по точному совпадению.
+     */
+    const normalized = normalizeSkuCode(code);
+    if (!normalized) return null;
+    return (window.kzSkuCatalog || []).find((item) => item.sku_code === normalized) || null;
+  };
+
+  window.filterSku = (query) => {
+    /**
+     * Учительская подсказка: фильтруем по коду и названию,
+     * чтобы поиск работал и по SKU, и по человекочитаемому названию.
+     */
+    const needle = normalizeSkuCode(query).toLowerCase();
+    const catalog = (window.kzSkuCatalog || []).filter((item) => item.is_active !== false);
+    if (!needle) return catalog;
+    return catalog.filter((item) => {
+      const code = normalizeSkuCode(item.sku_code).toLowerCase();
+      const name = normalizeSkuCode(item.name).toLowerCase();
+      return code.includes(needle) || name.includes(needle);
+    });
+  };
+
+  async function loadSkuCatalog() {
+    /**
+     * Учительская подсказка: загружаем каталог SKU без мастер-режима,
+     * чтобы очередь сразу показывала актуальные данные.
+     */
+    try {
+      const resp = await fetch(API_SKU_CATALOG_URL, { cache: "no-store" });
+      if (!resp.ok) {
+        return;
+      }
+      const data = await resp.json();
+      window.kzSkuCatalog = Array.isArray(data.items) ? data.items : [];
+      if (typeof window.onSkuCatalogLoaded === "function") {
+        window.onSkuCatalogLoaded(window.kzSkuCatalog);
+      }
+    } catch (error) {
+      console.warn("Не удалось загрузить каталог SKU:", error);
+    }
+  }
+  // Учительская подсказка: отдаём функцию наружу, чтобы UI мог обновлять каталог при необходимости.
+  window.loadSkuCatalog = loadSkuCatalog;
 
   function setMasterUi(masterId) {
     /**
@@ -235,6 +298,9 @@
     if (settingCanManualMode) {
       settingCanManualMode.disabled = !enabled;
     }
+    if (settingAllowShiftPlanImport) {
+      settingAllowShiftPlanImport.disabled = !enabled;
+    }
     if (settingCanSkipSku) {
       settingCanSkipSku.disabled = !enabled;
     }
@@ -251,9 +317,9 @@
     }
   }
 
-  window.importShiftPlanCsv = async (file) => {
+  window.importShiftPlanFile = async (file) => {
     /**
-     * Импорт сменного задания в мастер-режиме.
+     * Импорт сменного задания в мастер-режиме (только CSV).
      *
      * Мы отправляем файл на backend и показываем итог:
      * - успех: "Импортировано N позиций";
@@ -261,6 +327,10 @@
      * - отсутствие python-multipart: отдельное сообщение.
      */
     if (!file) return;
+    if (!String(file.name || "").toLowerCase().endsWith(".csv")) {
+      window.showPackToast?.("Поддерживается только CSV. Пожалуйста, выберите файл .csv.");
+      return;
+    }
     const formData = new FormData();
     formData.append("file", file);
     try {
@@ -275,7 +345,7 @@
       }
 
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) {
+      if (!resp.ok) {
         const errors = Array.isArray(data.errors) ? data.errors : [];
         if (errors.length) {
           const shown = errors.slice(0, 10).map((err) => String(err));
@@ -290,14 +360,16 @@
         return;
       }
 
-      const importedCount = Number.isFinite(data.imported_count) ? data.imported_count : 0;
+      const importedCount = Number.isFinite(data.total_items) ? data.total_items : 0;
       window.showPackToast?.(`Импортировано ${importedCount} позиций`);
 
-      if (typeof window.syncQueueFromBackend === "function") {
+      if (typeof window.refreshShiftPlanFromBackend === "function") {
+        await window.refreshShiftPlanFromBackend();
+      } else if (typeof window.syncQueueFromBackend === "function") {
         await window.syncQueueFromBackend();
       }
     } catch (error) {
-      window.showPackToast?.("Ошибка сети: CSV не импортирован.");
+      window.showPackToast?.("Ошибка сети: файл не импортирован.");
     }
   };
 
@@ -335,6 +407,9 @@
     if (settingCanManualMode) {
       settingCanManualMode.checked = !!settings.operator_can_manual_mode;
     }
+    if (settingAllowShiftPlanImport) {
+      settingAllowShiftPlanImport.checked = !!settings.allow_operator_shift_plan_import;
+    }
     if (settingCanSkipSku) {
       // Пока backend не хранит этот флаг, оставляем false и явно показываем TODO.
       // TODO: добавить operator_can_skip_sku в настройках backend.
@@ -350,6 +425,7 @@
         allow_add_from_catalog: !!settings.operator_can_add_sku_to_shift,
         allow_remove_sku: !!settings.operator_can_remove_sku_from_shift,
         allow_manual_mode: !!settings.operator_can_manual_mode,
+        allow_shift_plan_import: !!settings.allow_operator_shift_plan_import,
         allow_skip_sku: !!settings.operator_can_skip_sku,
       });
     }
@@ -396,8 +472,9 @@
       operator_can_add_sku_to_shift: !!settingCanAddSku?.checked,
       operator_can_remove_sku_from_shift: !!settingCanRemoveSku?.checked,
       operator_can_manual_mode: !!settingCanManualMode?.checked,
+      allow_operator_shift_plan_import: !!settingAllowShiftPlanImport?.checked,
       // TODO: добавить operator_can_skip_sku в backend и сохранять его здесь.
-    master_session_timeout_min: timeoutValue,
+      master_session_timeout_min: timeoutValue,
     };
     try {
       const resp = await fetch(API_SETTINGS_URL, {
@@ -639,6 +716,21 @@
     window.location.href = url.toString();
   }
 
+  function triggerSimpleCsvDownload(urlBase) {
+    /**
+     * Учительская подсказка: минимальный CSV скачиваем одной ссылкой.
+     */
+    if (!currentMasterId) return;
+    const dateValue = reportDateCsv?.value || "";
+    if (!dateValue) {
+      window.showPackToast?.("Выберите дату отчёта.");
+      return;
+    }
+    const url = new URL(urlBase, window.location.origin);
+    url.searchParams.set("date", dateValue);
+    window.location.href = url.toString();
+  }
+
   async function saveReportToUsb(format) {
     /**
      * Просим backend сохранить отчёт на USB и возвращаем путь.
@@ -683,6 +775,9 @@
     }
     if (reportDateTo && !reportDateTo.value) {
       reportDateTo.value = today;
+    }
+    if (reportDateCsv && !reportDateCsv.value) {
+      reportDateCsv.value = today;
     }
   }
 
@@ -1003,11 +1098,19 @@
   if (btnReportUsbXlsx) {
     btnReportUsbXlsx.addEventListener("click", () => saveReportToUsb("xlsx"));
   }
+  if (btnReportShiftCsv) {
+    btnReportShiftCsv.addEventListener("click", () => triggerSimpleCsvDownload(API_REPORT_SHIFT_CSV_URL));
+  }
+  if (btnReportWorkersCsv) {
+    btnReportWorkersCsv.addEventListener("click", () => triggerSimpleCsvDownload(API_REPORT_WORKERS_CSV_URL));
+  }
 
   // Стартовая синхронизация настроек.
   updateSettingsAvailability();
   renderTabs({ master_active: !!currentMasterId });
   fetchSettings();
+  // Учительская подсказка: каталог для очереди загружаем всегда, не только в мастер-режиме.
+  loadSkuCatalog();
   fetchSkuCatalog();
   setReportDefaultDates();
 })();
