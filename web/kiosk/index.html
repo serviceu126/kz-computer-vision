@@ -2562,8 +2562,11 @@ document.getElementById("bedDetails").textContent =
       if (!list.length) {
         shiftPlanUnknownWarning.style.display = "none";
       } else {
+        const preview = list.slice(0, 6).join(", ");
+        const suffix = list.length > 6 ? "…" : "";
         shiftPlanUnknownWarning.textContent =
-          `Не найдены в каталоге: ${list.slice(0, 6).join(", ")}${list.length > 6 ? "…" : ""}`;
+          `Не найдены в каталоге (${list.length}): ${preview}${suffix}. ` +
+          "Проверьте формат SKU: MM.Кровать.001-16.VelutaLux.07";
         shiftPlanUnknownWarning.style.display = "block";
       }
     }
@@ -2790,9 +2793,9 @@ document.getElementById("bedDetails").textContent =
     if (btnShiftPlanImport) {
       const isMasterActive = document.body.classList.contains("is-master-active");
       const importAllowed = isMasterActive || operatorSettings.allow_shift_plan_import;
-      setActionPillDisabled(btnShiftPlanImport, !importAllowed);
+      btnShiftPlanImport.classList.toggle("shift-plan-import-hidden", !importAllowed);
       if (shiftPlanImportHint) {
-        shiftPlanImportHint.style.display = importAllowed ? "none" : "block";
+        shiftPlanImportHint.style.display = "none";
       }
     }
   }
@@ -3604,6 +3607,11 @@ function mkModalBtn(text, kind, onClick) {
      * Это удерживает сетевую логику в одном месте и упрощает поддержку.
      */
     if (!file) return;
+    const isMasterActive = document.body.classList.contains("is-master-active");
+    if (!isMasterActive && !operatorSettings.allow_shift_plan_import) {
+      showPackToast("Импорт запрещен настройками мастера.");
+      return;
+    }
     if (typeof window.importShiftPlanFile !== "function") {
       showPackToast("Импорт временно недоступен.");
       return;

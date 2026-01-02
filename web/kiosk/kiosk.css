@@ -296,6 +296,11 @@ body:not(.is-master-active) .screen--master {
   margin-top: var(--space-2xs);
 }
 
+.shift-plan-import-hidden {
+  /* Учительский комментарий: полностью скрываем кнопку, если импорт запрещён оператору. */
+  display: none;
+}
+
 .shift-plan-sku-hint {
   /* Учительский комментарий: мягко напоминаем оператору канонический формат. */
   font-size: var(--font-xs);

@@ -400,60 +400,23 @@ def detect_csv_delimiter(sample_line: str) -> str:
 MAX_SHIFT_PLAN_ROWS = 500
 
 
-def normalize_sku_code(raw: str, catalog_map: dict) -> tuple[str | None, str | None]:
+def validate_sku_format(raw: str) -> tuple[str | None, str | None]:
     """
-    Нормализуем SKU строго к каноническому формату.
+    Валидируем SKU строго по каноническому формату.
 
     Канон: MM.Кровать.NNN-NN.Модель.XX
-    Разрешаем только мягкие исправления:
-    - добавить префикс MM.Кровать.;
-    - заменить дефис перед цветом на точку;
-    - исправить длину цвета (7 -> 07, 007 -> 07 при безопасном случае).
+    Никаких автоматических исправлений — только проверка.
     """
     sku_raw = (raw or "").strip()
     if not sku_raw:
         return None, "SKU пустой после очистки."
 
-    # Учительская подсказка: убираем пробелы внутри строки, чтобы избежать скрытых ошибок.
-    sku_raw = sku_raw.replace(" ", "")
+    # Учительская подсказка: допускаем только точное совпадение с шаблоном.
+    pattern = re.compile(r"^MM\.Кровать\.\d{3}-\d{1,2}\.[A-Za-z0-9]+\.\d{2}$")
+    if not pattern.match(sku_raw):
+        return None, "Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07."
 
-    prefix = "MM.Кровать."
-    if not sku_raw.startswith(prefix):
-        sku_raw = prefix + sku_raw.lstrip(".")
-
-    # Учительская подсказка: приводим повторяющиеся разделители к одному.
-    sku_raw = re.sub(r"[.]{2,}", ".", sku_raw)
-    sku_raw = re.sub(r"[-]{2,}", "-", sku_raw)
-
-    # Если цвет записан через дефис, заменяем последний дефис на точку.
-    if re.search(r"-\d{1,3}$", sku_raw) and not re.search(r"\.\d{1,3}$", sku_raw):
-        last_dash = sku_raw.rfind("-")
-        sku_raw = sku_raw[:last_dash] + "." + sku_raw[last_dash + 1 :]
-
-    pattern = re.compile(r"^MM\.Кровать\.(\d{3}-\d{2,3})\.([A-Za-z0-9]+)\.(\d{1,3})$")
-    match = pattern.match(sku_raw)
-    if not match:
-        return None, "Неверный формат SKU, ожидается MM.Кровать.001-16.VelutaLux.07."
-
-    size_part, model_part, color_part = match.groups()
-
-    if len(color_part) == 1:
-        color_part = color_part.zfill(2)
-    elif len(color_part) == 2:
-        pass
-    elif len(color_part) == 3 and color_part.startswith("0"):
-        # Учительская подсказка: 007 -> 07, но только если лидирующий ноль.
-        color_part = color_part[1:]
-    else:
-        return None, "Цвет должен быть двумя цифрами (пример: .07)."
-
-    normalized = f"{prefix}{size_part}.{model_part}.{color_part}"
-
-    # Если каталог есть и SKU не найден, это не ошибка формата, а предупреждение.
-    if catalog_map and normalized not in catalog_map:
-        return normalized, "SKU отсутствует в каталоге."
-
-    return normalized, None
+    return sku_raw, None
 
 
 def parse_shift_plan_csv_file(text: str) -> tuple[list[dict], list[str]]:
@@ -604,7 +567,9 @@ def build_canonical_sku(model_code: str, width_cm: int, fabric_code: str, color_
     Канон: MM.Кровать.NNN-NN.Модель.XX
     """
     model = (model_code or "").strip()
-    width = str(int(width_cm))
+    # Учительская подсказка: размер приводим к формату NNN-NN, например 160 -> 16.
+    width_value = int(width_cm)
+    width = str(int(width_value / 10)) if width_value >= 100 and width_value % 10 == 0 else str(width_value)
     fabric = (fabric_code or "").strip()
     color_raw = str(color_code or "").strip()
     color = color_raw.zfill(2)[-2:]
@@ -1281,7 +1246,7 @@ async def shift_plan_import(file: UploadFile = File(...)):
     if not plan_name:
         plan_name = "Сменное задание"
 
-    # Учительская подсказка: загружаем активный каталог и нормализуем SKU под канон.
+    # Учительская подсказка: загружаем активный каталог и валидируем формат SKU.
     catalog_items = list_sku_catalog(include_inactive=False)
     catalog_map = {row["sku_code"]: row for row in catalog_items}
 
@@ -1290,12 +1255,10 @@ async def shift_plan_import(file: UploadFile = File(...)):
     items_for_storage: list[dict] = []
     for item in items:
         raw_code = item["sku_code"]
-        normalized_code, reason = normalize_sku_code(raw_code, catalog_map)
-        if not normalized_code:
+        sku_code, reason = validate_sku_format(raw_code)
+        if not sku_code:
             errors.append(f"SKU '{raw_code}': {reason}")
             continue
-
-        sku_code = normalized_code
         if catalog_map and sku_code not in catalog_map:
             unknown_skus.append(raw_code.strip())
 
@@ -1598,14 +1561,14 @@ async def sku_create(payload: SkuCreateRequest):
     Создаёт SKU в каталоге (только мастер).
     """
     ensure_master_mode()
-    # Учительская подсказка: строим SKU из полей и приводим к канону.
+    # Учительская подсказка: строим SKU из полей и строго валидируем формат.
     draft_code = build_canonical_sku(
         model_code=payload.model_code,
         width_cm=payload.width_cm,
         fabric_code=payload.fabric_code,
         color_code=payload.color_code,
     )
-    sku_code, reason = normalize_sku_code(draft_code, {})
+    sku_code, reason = validate_sku_format(draft_code)
     if not sku_code:
         raise HTTPException(
             status_code=400,

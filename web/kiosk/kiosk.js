@@ -504,8 +504,15 @@
      *
      * Это важно, чтобы каталог и очередь всегда использовали один вид SKU.
      */
-    const model = (skuModelCode?.value || "").trim();
-    const width = (skuWidthCm?.value || "").trim();
+    const modelRaw = (skuModelCode?.value || "").trim();
+    const model = /^\d{1,3}$/.test(modelRaw) ? modelRaw.padStart(3, "0") : modelRaw;
+    const widthRaw = (skuWidthCm?.value || "").trim();
+    const widthValue = parseInt(widthRaw || "0", 10);
+    const width = Number.isFinite(widthValue) && widthValue > 0
+      ? (widthValue >= 100 && widthValue % 10 === 0
+        ? String(widthValue / 10)
+        : String(widthValue))
+      : "";
     const fabric = (skuFabricCode?.value || "").trim();
     const colorRaw = (skuColorCode?.value || "").trim();
     const color = colorRaw ? colorRaw.padStart(2, "0").slice(-2) : "";
@@ -516,6 +523,14 @@
       skuPreviewValue.textContent = result || "—";
     }
     return result;
+  }
+
+  function validateSkuCanonical(sku) {
+    /**
+     * Учительская подсказка: проверяем формат строго, без автоисправлений.
+     */
+    const pattern = /^MM\.Кровать\.\d{3}-\d{1,2}\.[A-Za-z0-9]+\.\d{2}$/;
+    return pattern.test(String(sku || "").trim());
   }
 
   function setSkuFormDisabled(disabled) {
@@ -790,7 +805,7 @@
      * Формат: MM.Кровать.NNN-NN.Модель.XX
      */
     const text = String(sku || "").trim();
-    const match = text.match(/^MM\.Кровать\.(\d{3})-(\d{2,3})\.([A-Za-z0-9]+)\.(\d{2})$/);
+    const match = text.match(/^MM\.Кровать\.(\d{3})-(\d{1,2})\.([A-Za-z0-9]+)\.(\d{2})$/);
     if (!match) return null;
     return {
       group: match[1],
@@ -945,6 +960,10 @@
     };
     if (!payload.sku_code || !payload.name) {
       window.showPackToast?.("Заполните код SKU и название.");
+      return;
+    }
+    if (!validateSkuCanonical(payload.sku_code)) {
+      window.showPackToast?.("Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.");
       return;
     }
     try {
