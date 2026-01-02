@@ -131,6 +131,201 @@ body:not(.is-master-active) .screen--master {
   padding: var(--space-2xl) var(--space-3xl);
 }
 
+/* Очередь: растягиваем по высоте, но сохраняем аккуратный центр. */
+.screen-content--queue {
+  /* Учительский комментарий: высота берётся от экрана, а скролл живёт внутри. */
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--space-2xl) var(--space-3xl);
+}
+
+.queue-shell {
+  /* Учительский комментарий: ширину ограничиваем, чтобы блок выглядел дорого. */
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-panel {
+  /* Учительский комментарий: панель очереди занимает всё доступное место. */
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-body {
+  /* Учительский комментарий: делим на "шапку" и "рабочую зону". */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  min-height: 0;
+}
+
+.queue-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.queue-master-bar {
+  /* Учительский комментарий: блок мастера держим вверху, чтобы кнопки были заметны. */
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: var(--border-info-soft);
+  background: var(--surface-info-soft);
+}
+
+.queue-master-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.queue-master-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.queue-warning {
+  /* Учительский комментарий: предупреждение показываем мягко, без агрессии. */
+  display: none;
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-md);
+  border: var(--border-warn);
+  background: var(--surface-warn);
+  color: var(--text-main);
+  font-size: var(--font-sm);
+}
+
+.queue-main {
+  /* Учительский комментарий: здесь основной список, поэтому именно он скроллится. */
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-right: var(--space-xs);
+}
+
+/* Убираем локальные ограничения высоты, чтобы скролл был общий для очереди. */
+.screen-content--queue .shift-plan-list {
+  max-height: none;
+  overflow: visible;
+}
+
+.screen-content--queue .shift-plan-catalog-list {
+  max-height: calc(var(--space-6xl) * 4);
+  overflow: auto;
+  /* Учительский комментарий: раскладку чипов задаём явно, чтобы не было "лома". */
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--size-catalog-min), 1fr));
+  gap: var(--space-xs);
+  align-items: stretch;
+}
+
+.shift-plan-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto auto;
+  gap: var(--space-xs);
+  align-items: center;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  border: var(--border-default);
+  background: var(--surface-deep);
+  font-size: var(--font-sm);
+}
+
+.shift-plan-sku {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  cursor: pointer;
+}
+
+.shift-plan-sku-code {
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+.shift-plan-sku-name {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.shift-plan-chip {
+  /* Учительский комментарий: чипы показывают код и имя в два этажа. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3xs);
+  text-align: center;
+}
+
+.shift-plan-chip-code {
+  font-weight: 600;
+}
+
+.shift-plan-chip-name {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.shift-plan-import-hint {
+  /* Учительский комментарий: подсказка нужна, когда кнопка импорта заблокирована. */
+  display: none;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-2xs);
+}
+
+.shift-plan-import-hidden {
+  /* Учительский комментарий: полностью скрываем кнопку, если импорт запрещён оператору. */
+  display: none;
+}
+
+.shift-plan-sku-hint {
+  /* Учительский комментарий: мягко напоминаем оператору канонический формат. */
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-2xs);
+}
+
+.reports-stub {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.reports-stub-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.reports-stub-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
 /* Три ключевые зоны оператора должны уметь сжиматься внутри экрана. */
 .top-bar,
 .middle,
@@ -290,8 +485,35 @@ body:not(.is-master-active) .screen--master {
   align-items: center;
 }
 
-.sku-catalog-list {
+.sku-catalog-grid {
+  /* Учительский комментарий: каталог — это витрина из 4 колонок. */
   margin-top: var(--space-lg);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-lg);
+  overflow-x: auto;
+  padding-bottom: var(--space-sm);
+}
+
+.sku-catalog-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border-radius: var(--radius-md);
+  border: var(--border-default);
+  background: var(--surface-deep);
+  min-width: 240px;
+}
+
+.sku-catalog-column-title {
+  font-size: var(--font-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.sku-catalog-column-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);

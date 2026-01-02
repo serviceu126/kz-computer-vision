@@ -1,5 +1,6 @@
 import sqlite3
 import time
+import json
 from pathlib import Path
 
 DB = Path("storage/kz_pack.db")
@@ -137,6 +138,24 @@ def init_db():
         items_json TEXT NOT NULL
     )
     """)
+    # Учительская ремарка:
+    # добавляем флаг активности без жёстких миграций, чтобы старые базы не ломались.
+    cur.execute("PRAGMA table_info(shift_plans)")
+    shift_plan_columns = [row["name"] for row in cur.fetchall()]
+    if "is_active" not in shift_plan_columns:
+        cur.execute("ALTER TABLE shift_plans ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0")
+
+    # Таблица позиций сменного задания:
+    # храним каждую строку отдельно, чтобы UI мог сортировать по позиции.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS shift_plan_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id INTEGER NOT NULL,
+        sku_code TEXT NOT NULL,
+        qty INTEGER NOT NULL,
+        position INTEGER NOT NULL
+    )
+    """)
 
     # Таблица настроек киоска.
     # Храним простые флаги (0/1), чтобы быстро управлять правами оператора.
@@ -179,6 +198,11 @@ def init_db():
     cur.execute(
         "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
         ["operator_can_manual_mode", 1],
+    )
+    # Учительская ремарка: по умолчанию оператор НЕ может импортировать план с флешки.
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["allow_operator_shift_plan_import", 0],
     )
     cur.execute(
         "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
@@ -867,6 +891,137 @@ def get_shift_plan(plan_id: int) -> sqlite3.Row | None:
     row = cur.fetchone()
     conn.close()
     return row
+
+
+def create_shift_plan_with_items(
+    shift_id: int,
+    name: str,
+    created_at: float,
+    items: list[dict],
+) -> int:
+    """
+    Создаёт новый сменный план и делает его активным.
+
+    Объяснение по-учительски:
+    - сначала деактивируем старые планы, чтобы активным был только один;
+    - сохраняем и JSON-версию (для обратной совместимости), и таблицу items;
+    - порядок строк фиксируем через position.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE shift_plans SET is_active=0 WHERE is_active=1")
+
+    items_json = json.dumps(
+        [{"sku_code": item["sku_code"], "qty": item["qty"]} for item in items],
+        ensure_ascii=False,
+    )
+    cur.execute(
+        """INSERT INTO shift_plans(shift_id, created_at, name, items_json, is_active)
+           VALUES (?, ?, ?, ?, 1)""",
+        [int(shift_id), float(created_at), name, items_json],
+    )
+    plan_id = int(cur.lastrowid or 0)
+
+    if plan_id and items:
+        rows = [
+            (plan_id, item["sku_code"], int(item["qty"]), index)
+            for index, item in enumerate(items)
+        ]
+        cur.executemany(
+            """INSERT INTO shift_plan_items(plan_id, sku_code, qty, position)
+               VALUES (?, ?, ?, ?)""",
+            rows,
+        )
+
+    conn.commit()
+    conn.close()
+    return plan_id
+
+
+def get_active_shift_plan() -> dict | None:
+    """
+    Возвращает активный сменный план вместе с позициями.
+
+    Учительская ремарка:
+    - храним план в двух местах, но читаем приоритетно из таблицы items;
+    - если items пуст, всё равно возвращаем шапку плана.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, name, created_at, shift_id FROM shift_plans WHERE is_active=1 ORDER BY created_at DESC LIMIT 1"
+    )
+    plan_row = cur.fetchone()
+    if not plan_row:
+        conn.close()
+        return None
+
+    cur.execute(
+        """SELECT sku_code, qty, position
+           FROM shift_plan_items
+           WHERE plan_id=?
+           ORDER BY position ASC""",
+        [int(plan_row["id"])],
+    )
+    items = [dict(row) for row in cur.fetchall() or []]
+    conn.close()
+    return {
+        "id": int(plan_row["id"]),
+        "name": plan_row["name"],
+        "created_at": plan_row["created_at"],
+        "shift_id": plan_row["shift_id"],
+        "items": items,
+    }
+
+
+def set_active_shift_plan(plan_id: int) -> None:
+    """
+    Делает план активным и выключает остальные.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE shift_plans SET is_active=0 WHERE is_active=1")
+    cur.execute("UPDATE shift_plans SET is_active=1 WHERE id=?", [int(plan_id)])
+    conn.commit()
+    conn.close()
+
+
+def clear_active_shift_plan() -> None:
+    """
+    Снимаем активность с текущего плана.
+
+    Почему так:
+    - план остаётся в истории, но UI больше не считает его активным.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE shift_plans SET is_active=0 WHERE is_active=1")
+    conn.commit()
+    conn.close()
+
+
+def get_sku_catalog_map(sku_codes: list[str]) -> dict:
+    """
+    Возвращает словарь sku_code -> запись из каталога.
+
+    Учительская подсказка:
+    - делаем один запрос IN (...), чтобы не бегать по базе циклом;
+    - если список пуст, сразу отдаём пустой словарь.
+    """
+    if not sku_codes:
+        return {}
+    conn = get_conn()
+    cur = conn.cursor()
+    placeholders = ",".join(["?"] * len(sku_codes))
+    cur.execute(
+        f"""SELECT sku_code, name, is_active
+            FROM sku_catalog
+            WHERE sku_code IN ({placeholders})""",
+        sku_codes,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return {row["sku_code"]: dict(row) for row in (rows or [])}
 
 
 def get_active_shift_id() -> int:
