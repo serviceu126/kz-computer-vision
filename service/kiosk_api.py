@@ -1,20 +1,44 @@
 from pathlib import Path
 from typing import List, Optional, Literal
+import re
+import importlib.util
 import json
 import time
+import sqlite3
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import csv
+import io
 
 from core.logic import engine, KioskUIState
 from core.storage import (
+    add_event,
     get_conn,
     create_shift_plan,
     get_active_shift_id,
     get_shift_plan,
     list_shift_plans,
+    get_kiosk_setting,
+    get_kiosk_settings,
+    set_kiosk_setting,
+    get_master_session,
+    set_master_session,
+    clear_master_session,
+    update_master_last_active,
+    list_sku_catalog,
+    create_sku_catalog_item,
+    update_sku_catalog_item,
+    get_report_rows,
+    get_sku_catalog_validation_data,
+    list_queue_items,
+    add_or_update_queue_item,
+    update_queue_qty,
+    remove_queue_item,
+    reorder_queue_items,
+    replace_queue_items,
 )
 from services.packaging import (
     advance_phase,
@@ -110,6 +134,12 @@ class KioskState(BaseModel):
     camera_stream_url: str="http://127.0.0.1:8080/stream"
     overlay_slots: List[OverlaySlot]
 
+    # Режим мастера (супервайзер).
+    # Нужен только для UI, чтобы подсветить, кто имеет право на ручные действия.
+    master_mode: bool = False
+    master_id: Optional[str] = None
+    master_active: bool = False
+
 
 class StartSessionRequest(BaseModel):
     worker_id: Optional[str] = None
@@ -162,6 +192,301 @@ class ShiftPlanSelectRequest(BaseModel):
     plan_id: int
 
 
+class MasterLoginRequest(BaseModel):
+    qr_text: str
+
+
+class KioskSettingsRequest(BaseModel):
+    operator_can_reorder: Optional[bool] = None
+    operator_can_edit_qty: Optional[bool] = None
+    operator_can_add_sku_to_shift: Optional[bool] = None
+    operator_can_remove_sku_from_shift: Optional[bool] = None
+    operator_can_manual_mode: Optional[bool] = None
+    master_session_timeout_min: Optional[int] = None
+
+
+class MasterLogoutRequest(BaseModel):
+    reason: Optional[str] = "manual"
+
+
+class SkuCreateRequest(BaseModel):
+    sku_code: str
+    name: str
+    model_code: str
+    width_cm: int
+    fabric_code: str
+    color_code: str
+    is_active: Optional[bool] = True
+
+
+class SkuUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class ReportSaveRequest(BaseModel):
+    report_type: str
+    date_from: str
+    date_to: str
+    format: Literal["csv", "xlsx"]
+
+
+class QueueAddRequest(BaseModel):
+    sku_code: str
+    qty: int = 1
+
+
+class QueueUpdateRequest(BaseModel):
+    qty: int
+
+
+class QueueReorderRequest(BaseModel):
+    item_ids: List[int]
+
+
+def update_master_activity():
+    # Фиксируем время последнего действия мастера в базе.
+    # Так таймаут считается устойчиво, даже после перезапуска сервиса.
+    update_master_last_active(int(time.time()))
+
+
+def ensure_master_session_alive():
+    """
+    Проверяем, истёк ли таймаут мастер-сессии.
+
+    Почему делаем это на уровне API:
+    - фронт регулярно опрашивает /api/kiosk/state;
+    - так мы автоматически выключаем режим при бездействии,
+      даже если оператор ничего не нажимал.
+    """
+    session = get_master_session()
+    if not session.get("enabled"):
+        return
+    timeout_min = get_kiosk_setting("master_session_timeout_min", 15)
+    timeout_min = max(1, min(int(timeout_min or 15), 240))
+    last_activity = session.get("last_active_ts") or 0
+    if (time.time() - last_activity) > (timeout_min * 60):
+        master_id = session.get("master_id")
+        if master_id:
+            add_event(
+                event_type="master_logout",
+                ts=time.time(),
+                payload_json=json.dumps(
+                    {"master_id": master_id, "reason": "timeout"},
+                    ensure_ascii=False,
+                ),
+                shift_id=get_active_shift_id(),
+            )
+        clear_master_session()
+
+
+def ensure_master_mode() -> dict:
+    """
+    Проверяем, что мастер-режим активен.
+
+    Это единая точка контроля, чтобы не дублировать проверки
+    по всем endpoint-ам каталога.
+    """
+    ensure_master_session_alive()
+    session = get_master_session()
+    if not session.get("enabled"):
+        raise HTTPException(status_code=403, detail="Доступно только в мастер-режиме.")
+    return session
+
+
+def is_master_active() -> bool:
+    """
+    Проверяем, активен ли мастер-режим.
+
+    Это нужно для разграничения прав оператора и мастера.
+    """
+    session = get_master_session()
+    return bool(session.get("enabled"))
+
+
+def ensure_queue_permission(setting_key: str) -> None:
+    """
+    Проверяем право на изменение очереди.
+
+    Мастер всегда может, оператор — только если разрешено настройкой.
+    """
+    ensure_master_session_alive()
+    if is_master_active():
+        return
+    if get_kiosk_setting(setting_key, 0) != 1:
+        raise HTTPException(status_code=403, detail="Операция запрещена настройками мастера.")
+
+
+def validate_report_params(report_type: str, date_from: str, date_to: str) -> None:
+    """
+    Проверяем параметры отчёта, чтобы backend не падал на неверных датах.
+    """
+    if report_type not in {"employees", "sku", "shifts"}:
+        raise HTTPException(status_code=400, detail="Неизвестный тип отчёта.")
+    try:
+        time.strptime(date_from, "%Y-%m-%d")
+        time.strptime(date_to, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD.") from exc
+
+
+def build_report_headers(report_type: str) -> list[str]:
+    # Подбираем заголовки столбцов под каждый тип отчёта.
+    if report_type == "employees":
+        return ["worker_id", "packed_count", "worktime_sec", "downtime_sec"]
+    if report_type == "sku":
+        return ["sku", "packed_count"]
+    return ["shift_id", "worker_id", "start_time", "finish_time", "packed_count"]
+
+
+def build_report_csv(rows: list[dict], headers: list[str]) -> bytes:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([row.get(col, "") for col in headers])
+    return output.getvalue().encode("utf-8")
+
+
+def build_report_xlsx(rows: list[dict], headers: list[str]) -> bytes:
+    """
+    Собираем XLSX, но импортируем openpyxl только внутри функции.
+
+    Это важно: сервер должен запускаться без openpyxl,
+    а при отсутствии библиотеки мы возвращаем понятную ошибку.
+    """
+    try:
+        from openpyxl import Workbook
+    except ImportError as exc:
+        raise HTTPException(status_code=400, detail="Для XLSX установите openpyxl.") from exc
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(headers)
+    for row in rows:
+        ws.append([row.get(col, "") for col in headers])
+    # Простейшая настройка ширины колонок, чтобы текст не слипался.
+    for idx, header in enumerate(headers, start=1):
+        ws.column_dimensions[chr(64 + idx)].width = max(12, len(header) + 2)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def detect_csv_delimiter(sample_line: str) -> str:
+    """
+    Определяем разделитель CSV по первой строке.
+
+    Мы допускаем три варианта: запятая, точка с запятой, таб.
+    Выбираем тот, который встречается чаще остальных.
+    """
+    candidates = [",", ";", "\t"]
+    counts = {sep: sample_line.count(sep) for sep in candidates}
+    best = max(counts, key=counts.get)
+    return best if counts[best] > 0 else ","
+
+
+def parse_shift_plan_csv(
+    text: str,
+    active_sku_codes: set[str],
+    validate_against_catalog: bool,
+) -> tuple[list[dict], list[str]]:
+    """
+    Парсим CSV в список SKU с количеством.
+
+    Возвращаем:
+    - items: список словарей {sku_code, qty} в порядке появления;
+    - errors: список текстовых ошибок для пользователя.
+    """
+    errors: list[str] = []
+    aggregated: dict[str, int] = {}
+    order: list[str] = []
+
+    # Берём первую непустую строку, чтобы выбрать разделитель.
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return [], ["Файл пуст или не содержит данных."]
+
+    delimiter = detect_csv_delimiter(lines[0])
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+
+    # Проверяем, есть ли заголовок "sku_code, qty".
+    header = None
+    try:
+        header = next(reader)
+    except StopIteration:
+        return [], ["Файл пуст или не содержит данных."]
+
+    header_cells = [cell.strip().lower() for cell in header]
+    has_header = "sku_code" in header_cells and "qty" in header_cells
+
+    if not has_header:
+        # Если заголовка нет, возвращаемся на первую строку как на данные.
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+
+    for row in reader:
+        if not row or not any(cell.strip() for cell in row):
+            # Пропускаем полностью пустые строки.
+            continue
+        sku_raw = (row[0] if len(row) > 0 else "").strip()
+        qty_raw = (row[1] if len(row) > 1 else "").strip()
+        line_no = reader.line_num
+
+        if not sku_raw:
+            errors.append(f"Строка {line_no}: SKU не указан.")
+            continue
+        if not qty_raw:
+            errors.append(f"Строка {line_no}: количество не указано.")
+            continue
+        try:
+            qty_val = int(qty_raw)
+        except ValueError:
+            errors.append(f"Строка {line_no}: количество '{qty_raw}' не является числом.")
+            continue
+        if qty_val <= 0:
+            errors.append(f"Строка {line_no}: количество должно быть больше нуля.")
+            continue
+
+        if validate_against_catalog and sku_raw not in active_sku_codes:
+            errors.append(f"Строка {line_no}: SKU '{sku_raw}' отсутствует или неактивен в каталоге.")
+            continue
+
+        # Повторяющиеся SKU суммируем, а порядок берём по первой встрече.
+        if sku_raw not in aggregated:
+            aggregated[sku_raw] = qty_val
+            order.append(sku_raw)
+        else:
+            aggregated[sku_raw] += qty_val
+
+    items = [{"sku_code": sku, "qty": aggregated[sku]} for sku in order]
+    return items, errors
+
+
+def find_usb_mounts() -> list[Path]:
+    """
+    Ищем смонтированные USB-носители в типичных папках Linux.
+    """
+    roots = [Path("/media"), Path("/run/media")]
+    mounts: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.glob("*/*"):
+            if path.is_dir():
+                mounts.append(path)
+    return mounts
+
+
+def build_usb_report_path(base_dir: Path, filename: str) -> Path:
+    """
+    Формируем путь и проверяем, что он остаётся внутри USB директории.
+    """
+    target = (base_dir / filename).resolve()
+    if base_dir.resolve() not in target.parents and target != base_dir.resolve():
+        raise HTTPException(status_code=400, detail="Некорректный путь файла.")
+    return target
+
+
 app = FastAPI(title="KZ Kiosk API")
 
 app.mount(
@@ -178,7 +503,10 @@ async def root():
 
 @app.get("/api/kiosk/state", response_model=KioskState)
 async def get_state():
+    ensure_master_session_alive()
     ui: KioskUIState = engine.get_ui_state()
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
     return KioskState(
         worker_name=ui.worker_name,
         shift_label=ui.shift_label,
@@ -239,7 +567,63 @@ async def get_state():
             )
             for o in ui.overlay_slots
         ],
+        master_mode=bool(master_id),
+        master_id=master_id,
+        master_active=bool(master_id),
     )
+
+
+@app.post("/api/kiosk/master/login")
+async def master_login(payload: MasterLoginRequest):
+    """
+    Вход в режим мастера по QR-коду.
+
+    Формат:
+    - буква M и 8 цифр (например, M13540876).
+    Почему так:
+    - формат легко распознаётся сканером;
+    - мы быстро валидируем его без внешних сервисов.
+    """
+    qr_text = (payload.qr_text or "").strip()
+    match = re.fullmatch(r"[MМ](\d{8})", qr_text)
+    if not match:
+        raise HTTPException(
+            status_code=400,
+            detail="Неверный QR мастера. Ожидается формат M######## (например, M13540876).",
+        )
+    master_id = match.group(1)
+    set_master_session(master_id=master_id, last_active_ts=int(time.time()))
+    add_event(
+        event_type="master_login",
+        ts=time.time(),
+        payload_json=json.dumps({"master_id": master_id}, ensure_ascii=False),
+        shift_id=get_active_shift_id(),
+    )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/session/start")
@@ -462,6 +846,14 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
     if not shift_id:
         raise HTTPException(status_code=409, detail="Нет активной смены для загрузки плана.")
 
+    # Проверяем право редактирования количества/очереди.
+    # Если мастер запретил редактирование, оператор не должен менять список.
+    if get_kiosk_setting("operator_can_edit_qty", 1) == 0:
+        raise HTTPException(
+            status_code=403,
+            detail="Редактирование списка запрещено настройками мастера.",
+        )
+
     raw_items: List[str] = []
     if payload.items:
         raw_items = payload.items
@@ -480,6 +872,64 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
         items_json=json.dumps(items, ensure_ascii=False),
     )
     return {"status": "ok", "id": plan_id, "name": name, "count": len(items)}
+
+
+@app.post("/api/kiosk/shift_plan/import_csv")
+async def shift_plan_import_csv(request: Request):
+    """
+    Импорт сменного задания из CSV (только мастер).
+
+    Формат CSV:
+    - sku_code, qty
+    """
+    ensure_master_mode()
+    update_master_activity()
+
+    # Проверяем наличие python-multipart только при попытке импорта,
+    # чтобы сервер мог запускаться без дополнительной зависимости.
+    if importlib.util.find_spec("multipart") is None:
+        raise HTTPException(
+            status_code=501,
+            detail="File upload requires python-multipart. Install it or use alternative import method.",
+        )
+
+    # Читаем файл из multipart формы.
+    try:
+        form = await request.form()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Не удалось прочитать форму загрузки.",
+        ) from exc
+
+    file = form.get("file")
+    if not file or not getattr(file, "filename", ""):
+        raise HTTPException(status_code=400, detail="Файл не найден в запросе.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Файл CSV пуст.")
+
+    # CSV читаем в Unicode, чтобы корректно обрабатывать кириллицу.
+    text = content.decode("utf-8-sig", errors="replace")
+
+    # Сначала берём список активных SKU, если каталог вообще есть.
+    active_skus, has_catalog = get_sku_catalog_validation_data()
+    items, errors = parse_shift_plan_csv(text, active_skus, has_catalog)
+
+    if errors:
+        # Если есть ошибки — ничего не меняем, импорт атомарный.
+        return JSONResponse(status_code=400, content={"ok": False, "errors": errors})
+
+    if not items:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "errors": ["Нет валидных строк."]},
+        )
+
+    # Полностью заменяем очередь, чтобы на смене был только новый список.
+    replace_queue_items(items)
+    return {"ok": True, "imported_count": len(items), "errors": []}
 
 
 @app.get("/api/kiosk/pack/plan/list")
@@ -544,6 +994,306 @@ async def pack_plan_select(payload: ShiftPlanSelectRequest):
             "items": items,
         },
     }
+
+
+@app.get("/api/kiosk/settings")
+async def get_kiosk_settings_api():
+    """
+    Возвращает настройки киоска.
+
+    Мы отдаём фиксированный набор ключей,
+    чтобы UI мог стабильно строить интерфейс.
+    """
+    ensure_master_session_alive()
+    settings = get_kiosk_settings(
+        [
+            "operator_can_reorder",
+            "operator_can_edit_qty",
+            "operator_can_add_sku_to_shift",
+            "operator_can_remove_sku_from_shift",
+            "operator_can_manual_mode",
+            "master_session_timeout_min",
+        ]
+    )
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    return {
+        "status": "ok",
+        "settings": {
+            "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
+            "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
+            "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
+            "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
+            "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
+            "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
+        },
+        "master_mode": bool(master_id),
+        "master_id": master_id,
+    }
+
+
+@app.post("/api/kiosk/settings")
+async def set_kiosk_settings_api(payload: KioskSettingsRequest):
+    """
+    Сохраняет настройки киоска.
+
+    Важно:
+    - менять настройки может только мастер (QR уже отсканирован);
+    - изменения сразу сохраняются в SQLite и переживают перезапуск сервиса.
+    """
+    ensure_master_session_alive()
+    session = get_master_session()
+    if not session.get("enabled"):
+        raise HTTPException(status_code=403, detail="Настройки доступны только мастеру.")
+
+    changed_keys: list[str] = []
+    if payload.operator_can_reorder is not None:
+        set_kiosk_setting("operator_can_reorder", int(payload.operator_can_reorder))
+        changed_keys.append("operator_can_reorder")
+    if payload.operator_can_edit_qty is not None:
+        set_kiosk_setting("operator_can_edit_qty", int(payload.operator_can_edit_qty))
+        changed_keys.append("operator_can_edit_qty")
+    if payload.operator_can_add_sku_to_shift is not None:
+        set_kiosk_setting(
+            "operator_can_add_sku_to_shift", int(payload.operator_can_add_sku_to_shift)
+        )
+        changed_keys.append("operator_can_add_sku_to_shift")
+    if payload.operator_can_remove_sku_from_shift is not None:
+        set_kiosk_setting(
+            "operator_can_remove_sku_from_shift", int(payload.operator_can_remove_sku_from_shift)
+        )
+        changed_keys.append("operator_can_remove_sku_from_shift")
+    if payload.operator_can_manual_mode is not None:
+        set_kiosk_setting("operator_can_manual_mode", int(payload.operator_can_manual_mode))
+        changed_keys.append("operator_can_manual_mode")
+    if payload.master_session_timeout_min is not None:
+        timeout = int(payload.master_session_timeout_min)
+        if timeout < 1 or timeout > 240:
+            raise HTTPException(
+                status_code=400,
+                detail="Таймаут мастера должен быть в диапазоне 1..240 минут.",
+            )
+        set_kiosk_setting("master_session_timeout_min", timeout)
+        changed_keys.append("master_session_timeout_min")
+
+    update_master_activity()
+    if changed_keys:
+        add_event(
+            event_type="settings_change",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": session.get("master_id"), "keys": changed_keys},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    settings = get_kiosk_settings(
+        [
+            "operator_can_reorder",
+            "operator_can_edit_qty",
+            "operator_can_add_sku_to_shift",
+            "operator_can_remove_sku_from_shift",
+            "operator_can_manual_mode",
+            "master_session_timeout_min",
+        ]
+    )
+    return {
+        "status": "ok",
+        "settings": {
+            "operator_can_reorder": bool(settings.get("operator_can_reorder", 1)),
+            "operator_can_edit_qty": bool(settings.get("operator_can_edit_qty", 1)),
+            "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
+            "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
+            "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
+            "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
+        },
+        "master_mode": True,
+        "master_id": session.get("master_id"),
+    }
+
+
+@app.get("/api/kiosk/sku")
+async def sku_list(
+    q: Optional[str] = Query(None, description="Поиск по SKU/названию/модели"),
+    include_inactive: bool = Query(False, description="Показывать неактивные SKU"),
+):
+    """
+    Возвращает список SKU из каталога.
+
+    По умолчанию отдаём только активные позиции,
+    чтобы UI не захламлялся архивом.
+    """
+    ensure_master_mode()
+    items = list_sku_catalog(search=q, include_inactive=include_inactive)
+    return {"status": "ok", "items": items}
+
+
+@app.post("/api/kiosk/sku")
+async def sku_create(payload: SkuCreateRequest):
+    """
+    Создаёт SKU в каталоге (только мастер).
+    """
+    ensure_master_mode()
+    sku_code = payload.sku_code.strip()
+    name = payload.name.strip()
+    if not sku_code or not name:
+        raise HTTPException(status_code=400, detail="SKU и имя не должны быть пустыми.")
+    try:
+        sku_id = create_sku_catalog_item(
+            sku_code=sku_code,
+            name=name,
+            model_code=payload.model_code.strip(),
+            width_cm=int(payload.width_cm),
+            fabric_code=payload.fabric_code.strip(),
+            color_code=payload.color_code.strip(),
+            is_active=1 if payload.is_active else 0,
+        )
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.")
+    return {"status": "ok", "id": sku_id}
+
+
+@app.put("/api/kiosk/sku/{sku_id}")
+async def sku_update(sku_id: int, payload: SkuUpdateRequest):
+    """
+    Редактирует SKU (только имя и активность), только мастер.
+    """
+    ensure_master_mode()
+    update_sku_catalog_item(
+        sku_id=sku_id,
+        name=payload.name.strip() if payload.name is not None else None,
+        is_active=1 if payload.is_active else (0 if payload.is_active is False else None),
+    )
+    return {"status": "ok"}
+
+
+@app.get("/api/kiosk/reports/preview")
+async def report_preview(
+    report_type: str = Query(..., alias="type"),
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+):
+    """
+    Возвращает первые 50 строк отчёта для предпросмотра.
+    """
+    ensure_master_mode()
+    validate_report_params(report_type, date_from, date_to)
+    rows = get_report_rows(report_type, date_from, date_to)[:50]
+    return {"status": "ok", "rows": rows}
+
+
+@app.get("/api/kiosk/reports/export")
+async def report_export(
+    report_type: str = Query(..., alias="type"),
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    format: Literal["csv", "xlsx"] = Query("csv"),
+):
+    """
+    Экспортирует отчёт в CSV/XLSX и отдаёт файл на скачивание.
+    """
+    ensure_master_mode()
+    validate_report_params(report_type, date_from, date_to)
+    rows = get_report_rows(report_type, date_from, date_to)
+    headers = build_report_headers(report_type)
+    if format == "xlsx":
+        content = build_report_xlsx(rows, headers)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        content = build_report_csv(rows, headers)
+        media_type = "text/csv"
+    filename = f"report_{report_type}_{date_from}_{date_to}.{format}"
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/kiosk/reports/save_to_usb")
+async def report_save_to_usb(payload: ReportSaveRequest):
+    """
+    Сохраняет отчёт на USB-носитель.
+    """
+    ensure_master_mode()
+    validate_report_params(payload.report_type, payload.date_from, payload.date_to)
+    mounts = find_usb_mounts()
+    if not mounts:
+        raise HTTPException(status_code=404, detail="USB not found")
+    target_dir = mounts[0]
+    timestamp = int(time.time())
+    filename = (
+        f"report_{payload.report_type}_{payload.date_from}_{payload.date_to}_{timestamp}."
+        f"{payload.format}"
+    )
+    target_path = build_usb_report_path(target_dir, filename)
+    rows = get_report_rows(payload.report_type, payload.date_from, payload.date_to)
+    headers = build_report_headers(payload.report_type)
+    if payload.format == "xlsx":
+        content = build_report_xlsx(rows, headers)
+    else:
+        content = build_report_csv(rows, headers)
+    target_path.write_bytes(content)
+    return {"status": "ok", "path": str(target_path)}
+
+
+@app.get("/api/kiosk/queue")
+async def queue_list():
+    """
+    Возвращает очередь SKU для отображения в UI.
+    """
+    ensure_master_session_alive()
+    items = list_queue_items()
+    return {"status": "ok", "items": items}
+
+
+@app.post("/api/kiosk/queue/items")
+async def queue_add(payload: QueueAddRequest):
+    """
+    Добавляет SKU в очередь.
+    """
+    ensure_queue_permission("operator_can_add_sku_to_shift")
+    sku_code = (payload.sku_code or "").strip()
+    if not sku_code:
+        raise HTTPException(status_code=400, detail="SKU не указан.")
+    if payload.qty <= 0:
+        raise HTTPException(status_code=400, detail="Количество должно быть больше нуля.")
+    item_id = add_or_update_queue_item(sku_code, payload.qty)
+    return {"status": "ok", "id": item_id}
+
+
+@app.patch("/api/kiosk/queue/items/{item_id}")
+async def queue_update(item_id: int, payload: QueueUpdateRequest):
+    """
+    Обновляет количество SKU в очереди.
+    """
+    ensure_queue_permission("operator_can_edit_qty")
+    if payload.qty <= 0:
+        raise HTTPException(status_code=400, detail="Количество должно быть больше нуля.")
+    update_queue_qty(item_id, payload.qty)
+    return {"status": "ok"}
+
+
+@app.post("/api/kiosk/queue/reorder")
+async def queue_reorder(payload: QueueReorderRequest):
+    """
+    Перестраивает очередь по списку id.
+    """
+    ensure_queue_permission("operator_can_reorder")
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="Список id пуст.")
+    reorder_queue_items(payload.item_ids)
+    return {"status": "ok"}
+
+
+@app.delete("/api/kiosk/queue/items/{item_id}")
+async def queue_delete(item_id: int):
+    """
+    Удаляет позицию из очереди.
+    """
+    ensure_queue_permission("operator_can_remove_sku_from_shift")
+    remove_queue_item(item_id)
+    return {"status": "ok"}
 
 
 @app.get("/api/kiosk/pack/plan")
