@@ -480,8 +480,35 @@ body:not(.is-master-active) .screen--master {
   align-items: center;
 }
 
-.sku-catalog-list {
+.sku-catalog-grid {
+  /* Учительский комментарий: каталог — это витрина из 4 колонок. */
   margin-top: var(--space-lg);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-lg);
+  overflow-x: auto;
+  padding-bottom: var(--space-sm);
+}
+
+.sku-catalog-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border-radius: var(--radius-md);
+  border: var(--border-default);
+  background: var(--surface-deep);
+  min-width: 240px;
+}
+
+.sku-catalog-column-title {
+  font-size: var(--font-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.sku-catalog-column-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);

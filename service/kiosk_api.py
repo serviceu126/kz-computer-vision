@@ -596,6 +596,20 @@ def format_timestamp(ts_value: float | None) -> str:
         return ""
     return datetime.fromtimestamp(ts_value).strftime("%Y-%m-%d %H:%M:%S")
 
+
+def build_canonical_sku(model_code: str, width_cm: int, fabric_code: str, color_code: str) -> str:
+    """
+    Собираем SKU в строгом каноническом формате.
+
+    Канон: MM.Кровать.NNN-NN.Модель.XX
+    """
+    model = (model_code or "").strip()
+    width = str(int(width_cm))
+    fabric = (fabric_code or "").strip()
+    color_raw = str(color_code or "").strip()
+    color = color_raw.zfill(2)[-2:]
+    return f"MM.Кровать.{model}-{width}.{fabric}.{color}"
+
 def parse_shift_plan_csv(
     text: str,
     active_sku_codes: set[str],
@@ -1584,7 +1598,19 @@ async def sku_create(payload: SkuCreateRequest):
     Создаёт SKU в каталоге (только мастер).
     """
     ensure_master_mode()
-    sku_code = payload.sku_code.strip()
+    # Учительская подсказка: строим SKU из полей и приводим к канону.
+    draft_code = build_canonical_sku(
+        model_code=payload.model_code,
+        width_cm=payload.width_cm,
+        fabric_code=payload.fabric_code,
+        color_code=payload.color_code,
+    )
+    sku_code, reason = normalize_sku_code(draft_code, {})
+    if not sku_code:
+        raise HTTPException(
+            status_code=400,
+            detail=reason or "Неверный формат SKU. Ожидается MM.Кровать.001-16.VelutaLux.07.",
+        )
     name = payload.name.strip()
     if not sku_code or not name:
         raise HTTPException(status_code=400, detail="SKU и имя не должны быть пустыми.")

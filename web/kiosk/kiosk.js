@@ -500,16 +500,18 @@
 
   function buildSkuPreview() {
     /**
-     * Собираем SKU в простом формате без сложных шаблонов.
+     * Собираем SKU строго в каноническом формате.
      *
-     * Это MVP: показываем мастеру наглядный код без хитрых правил.
+     * Это важно, чтобы каталог и очередь всегда использовали один вид SKU.
      */
     const model = (skuModelCode?.value || "").trim();
     const width = (skuWidthCm?.value || "").trim();
     const fabric = (skuFabricCode?.value || "").trim();
-    const color = (skuColorCode?.value || "").trim();
-    const parts = [model, width, fabric, color].filter(Boolean);
-    const result = parts.join("-");
+    const colorRaw = (skuColorCode?.value || "").trim();
+    const color = colorRaw ? colorRaw.padStart(2, "0").slice(-2) : "";
+    const result = model && width && fabric && color
+      ? `MM.Кровать.${model}-${width}.${fabric}.${color}`
+      : "";
     if (skuPreviewValue) {
       skuPreviewValue.textContent = result || "—";
     }
@@ -781,46 +783,125 @@
     }
   }
 
-  function renderSkuCatalog(items) {
-    if (!skuCatalogList) return;
+  function parseSkuCanonical(sku) {
+    /**
+     * Разбираем канонический SKU по правилам.
+     *
+     * Формат: MM.Кровать.NNN-NN.Модель.XX
+     */
+    const text = String(sku || "").trim();
+    const match = text.match(/^MM\.Кровать\.(\d{3})-(\d{2,3})\.([A-Za-z0-9]+)\.(\d{2})$/);
+    if (!match) return null;
+    return {
+      group: match[1],
+      sizeNum: parseInt(match[2], 10),
+      model: match[3],
+      colorNum: parseInt(match[4], 10),
+    };
+  }
+
+  function groupCatalogSkus(items) {
+    /**
+     * Группируем каталог по коду кровати (первые 3 цифры).
+     */
+    const groups = new Map();
+    items.forEach((item) => {
+      const parsed = parseSkuCanonical(item.sku_code);
+      const groupKey = parsed ? parsed.group : "???";
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, []);
+      }
+      groups.get(groupKey).push({ item, parsed });
+    });
+    return groups;
+  }
+
+  function sortGroupItems(entries) {
+    /**
+     * Сортировка по правилам:
+     * 1) размер (число после дефиса);
+     * 2) модель (строка);
+     * 3) цвет (число).
+     */
+    return entries.sort((a, b) => {
+      if (!a.parsed || !b.parsed) return 0;
+      if (a.parsed.sizeNum !== b.parsed.sizeNum) {
+        return a.parsed.sizeNum - b.parsed.sizeNum;
+      }
+      if (a.parsed.model !== b.parsed.model) {
+        return a.parsed.model.localeCompare(b.parsed.model);
+      }
+      return a.parsed.colorNum - b.parsed.colorNum;
+    });
+  }
+
+  function renderSkuCatalogGrid(groups) {
+    /**
+     * Рисуем витрину из 4 колонок с горизонтальным скроллом.
+     */
     skuCatalogList.innerHTML = "";
-    if (!items.length) {
+    if (!groups.size) {
       const empty = document.createElement("div");
       empty.className = "settings-hint";
       empty.textContent = "Пока нет SKU. Добавьте первую запись.";
       skuCatalogList.appendChild(empty);
       return;
     }
-    items.forEach((item) => {
-      const row = document.createElement("div");
-      row.className = "sku-catalog-row";
 
-      const code = document.createElement("div");
-      code.className = "sku-catalog-title";
-      code.textContent = item.sku_code || "—";
+    const orderedKeys = Array.from(groups.keys()).sort();
+    orderedKeys.forEach((groupKey) => {
+      const column = document.createElement("div");
+      column.className = "sku-catalog-column";
 
-      const name = document.createElement("div");
-      name.className = "sku-catalog-meta";
-      name.innerHTML = `<div>${item.name || "—"}</div><div>${item.model_code || ""} • ${item.width_cm || ""} см • ${item.fabric_code || ""} • ${item.color_code || ""}</div>`;
+      const title = document.createElement("div");
+      title.className = "sku-catalog-column-title";
+      title.textContent = groupKey === "???" ? "Без группы" : `Кровать ${groupKey}`;
 
-      const status = document.createElement("div");
-      status.className = "sku-catalog-meta";
-      status.textContent = item.is_active ? "Активен" : "Неактивен";
+      const list = document.createElement("div");
+      list.className = "sku-catalog-column-list";
 
-      const actions = document.createElement("div");
-      actions.className = "sku-catalog-actions";
-      const editBtn = document.createElement("div");
-      editBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
-      editBtn.innerHTML = "<span class=\"dot\"></span><span>Редактировать</span>";
-      editBtn.addEventListener("click", () => openSkuModal("edit", item));
-      actions.appendChild(editBtn);
+      const entries = sortGroupItems(groups.get(groupKey) || []);
+      entries.forEach(({ item }) => {
+        const row = document.createElement("div");
+        row.className = "sku-catalog-row";
 
-      row.appendChild(code);
-      row.appendChild(name);
-      row.appendChild(status);
-      row.appendChild(actions);
-      skuCatalogList.appendChild(row);
+        const code = document.createElement("div");
+        code.className = "sku-catalog-title";
+        code.textContent = item.sku_code || "—";
+
+        const name = document.createElement("div");
+        name.className = "sku-catalog-meta";
+        name.innerHTML = `<div>${item.name || "—"}</div><div>${item.model_code || ""} • ${item.width_cm || ""} см • ${item.fabric_code || ""} • ${item.color_code || ""}</div>`;
+
+        const status = document.createElement("div");
+        status.className = "sku-catalog-meta";
+        status.textContent = item.is_active ? "Активен" : "Неактивен";
+
+        const actions = document.createElement("div");
+        actions.className = "sku-catalog-actions";
+        const editBtn = document.createElement("div");
+        editBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
+        editBtn.innerHTML = "<span class=\"dot\"></span><span>Редактировать</span>";
+        editBtn.addEventListener("click", () => openSkuModal("edit", item));
+        actions.appendChild(editBtn);
+
+        row.appendChild(code);
+        row.appendChild(name);
+        row.appendChild(status);
+        row.appendChild(actions);
+        list.appendChild(row);
+      });
+
+      column.appendChild(title);
+      column.appendChild(list);
+      skuCatalogList.appendChild(column);
     });
+  }
+
+  function renderSkuCatalog(items) {
+    if (!skuCatalogList) return;
+    const groups = groupCatalogSkus(items || []);
+    renderSkuCatalogGrid(groups);
   }
 
   async function saveSkuModal() {
