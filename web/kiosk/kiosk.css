@@ -105,8 +105,8 @@ body:not(.is-master-active) .screen--master {
 /* Оператор: фиксируем три строки (верх/центр/низ) для стабильной высоты. */
 .screen-content--operator {
   display: grid;
-  /* Сетка оператора: верх компактный, центр высокий, низ сокращён — рабочая зона важнее. */
-  grid-template-rows: minmax(120px, 160px) minmax(520px, 1.6fr) minmax(120px, 0.5fr);
+  /* Сетка оператора: средняя зона ~70–80% высоты, низ — компактный информативный блок. */
+  grid-template-rows: minmax(120px, 160px) minmax(0, 0.75fr) minmax(120px, 0.25fr);
   grid-template-areas:
     "top"
     "middle"
@@ -164,7 +164,7 @@ body:not(.is-master-active) .screen--master {
 /* Нижние блоки остаются информативными, но занимают меньше места, чем рабочая зона. */
 .bottom {
   min-height: 120px;
-  max-height: 160px;
+  max-height: 180px;
 }
 
 /* Камера должна вписываться в доступное место, не расширяя экран. */
