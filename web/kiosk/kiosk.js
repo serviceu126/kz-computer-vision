@@ -8,6 +8,7 @@
   const API_REPORT_PREVIEW_URL = "/api/kiosk/reports/preview";
   const API_REPORT_EXPORT_URL = "/api/kiosk/reports/export";
   const API_REPORT_USB_URL = "/api/kiosk/reports/save_to_usb";
+  const API_SHIFT_PLAN_IMPORT_URL = "/api/kiosk/shift_plan/import_csv";
 
   // UI-элементы мастера: кнопки, модалка, статус.
   const btnMasterLogin = document.getElementById("btnMasterLogin");
@@ -249,6 +250,56 @@
         : "Настройки доступны только мастеру. Перед изменением войдите как мастер.";
     }
   }
+
+  window.importShiftPlanCsv = async (file) => {
+    /**
+     * Импорт сменного задания в мастер-режиме.
+     *
+     * Мы отправляем файл на backend и показываем итог:
+     * - успех: "Импортировано N позиций";
+     * - ошибка: список из первых 10 ошибок + "…";
+     * - отсутствие python-multipart: отдельное сообщение.
+     */
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const resp = await fetch(API_SHIFT_PLAN_IMPORT_URL, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (resp.status === 501) {
+        window.showPackToast?.("Импорт файлов недоступен: нужен python-multipart");
+        return;
+      }
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) {
+        const errors = Array.isArray(data.errors) ? data.errors : [];
+        if (errors.length) {
+          const shown = errors.slice(0, 10).map((err) => String(err));
+          let message = shown.join("; ");
+          if (errors.length > 10) {
+            message += "…";
+          }
+          window.showPackToast?.(`Импорт отменён: ${message}`);
+        } else {
+          window.showPackToast?.(data.detail || "Импорт не выполнен.");
+        }
+        return;
+      }
+
+      const importedCount = Number.isFinite(data.imported_count) ? data.imported_count : 0;
+      window.showPackToast?.(`Импортировано ${importedCount} позиций`);
+
+      if (typeof window.syncQueueFromBackend === "function") {
+        await window.syncQueueFromBackend();
+      }
+    } catch (error) {
+      window.showPackToast?.("Ошибка сети: CSV не импортирован.");
+    }
+  };
 
   function clearSkuCatalog() {
     /**

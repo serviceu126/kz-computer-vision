@@ -466,6 +466,29 @@ def get_active_sku_codes() -> set[str]:
     return {row["sku_code"] for row in (rows or [])}
 
 
+def get_sku_catalog_validation_data() -> tuple[set[str], bool]:
+    """
+    Возвращает активные SKU и флаг наличия каталога.
+
+    Это нужно для импорта CSV: если каталог пуст,
+    мы не блокируем новые SKU, а если каталог есть —
+    требуем только активные коды.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT sku_code, is_active FROM sku_catalog")
+    rows = cur.fetchall() or []
+    conn.close()
+    if not rows:
+        return set(), False
+    active = {
+        row["sku_code"]
+        for row in rows
+        if int(row["is_active"] or 0) == 1
+    }
+    return active, True
+
+
 def get_report_rows(report_type: str, date_from: str, date_to: str) -> list[dict]:
     """
     Формирует строки отчёта по типу и диапазону дат.
@@ -632,306 +655,40 @@ def reorder_queue_items(item_ids: list[int]) -> None:
     conn.close()
 
 
-def get_kiosk_setting(key: str, default: int = 0) -> int:
-    # Читаем настройку по ключу.
-    # Если записи нет, возвращаем безопасный дефолт.
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT value FROM kiosk_settings WHERE key=?", [key])
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return int(default)
-    return int(row["value"] or 0)
-
-
-def set_kiosk_setting(key: str, value: int) -> None:
-    # Записываем настройку (0/1) по ключу.
-    # Используем INSERT OR REPLACE, чтобы обновлять без сложных проверок.
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT OR REPLACE INTO kiosk_settings(key, value) VALUES (?, ?)",
-        [key, int(value)],
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_kiosk_settings(keys: list[str]) -> dict[str, int]:
-    # Массовое чтение настроек.
-    # Это ускоряет UI-запросы и упрощает обработку.
-    conn = get_conn()
-    cur = conn.cursor()
-    placeholders = ",".join("?" for _ in keys)
-    cur.execute(
-        f"SELECT key, value FROM kiosk_settings WHERE key IN ({placeholders})",
-        keys,
-    )
-    rows = cur.fetchall()
-    conn.close()
-    return {row["key"]: int(row["value"] or 0) for row in (rows or [])}
-
-
-def get_master_session() -> dict[str, int | str | None]:
+def replace_queue_items(items: list[dict]) -> None:
     """
-    Читает текущую мастер-сессию из БД.
+    Полностью заменяем очередь SKU в транзакции.
 
-    Возвращаем словарь с полями:
-    - enabled: 0/1
-    - master_id: строка или None
-    - last_active_ts: unix time (int) или None
+    Важно:
+    - если что-то пошло не так, мы откатываем изменения;
+    - позиции пересчитываются по порядку items.
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        "SELECT master_id, last_active_ts, enabled FROM kiosk_master_session WHERE id=1"
-    )
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return {"enabled": 0, "master_id": None, "last_active_ts": None}
-    return {
-        "enabled": int(row["enabled"] or 0),
-        "master_id": row["master_id"],
-        "last_active_ts": row["last_active_ts"],
-    }
-
-
-def set_master_session(master_id: str, last_active_ts: int) -> None:
-    """
-    Включает мастер-режим и фиксирует активность.
-
-    Мы пишем всегда в строку id=1, чтобы не усложнять логику.
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """UPDATE kiosk_master_session
-           SET master_id=?, last_active_ts=?, enabled=1
-           WHERE id=1""",
-        [master_id, int(last_active_ts)],
-    )
-    conn.commit()
-    conn.close()
-
-
-def clear_master_session() -> None:
-    """
-    Отключает мастер-режим.
-
-    Мы очищаем master_id и таймштамп, чтобы UI видел пустое состояние.
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """UPDATE kiosk_master_session
-           SET master_id=NULL, last_active_ts=NULL, enabled=0
-           WHERE id=1"""
-    )
-    conn.commit()
-    conn.close()
-
-
-def update_master_last_active(last_active_ts: int) -> None:
-    """
-    Обновляет время последней активности мастера.
-
-    Этот метод вызываем при любых мастер-действиях,
-    чтобы таймаут отсчитывался корректно.
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """UPDATE kiosk_master_session
-           SET last_active_ts=?
-           WHERE id=1 AND enabled=1""",
-        [int(last_active_ts)],
-    )
-    conn.commit()
-    conn.close()
-
-
-def list_sku_catalog(search: str | None = None, include_inactive: bool = False) -> list[dict]:
-    """
-    Возвращает список SKU из каталога.
-
-    По умолчанию показываем только активные позиции,
-    чтобы оператор не видел архивные записи.
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    params: list = []
-    where = []
-    if not include_inactive:
-        where.append("is_active = 1")
-    if search:
-        where.append("(sku_code LIKE ? OR name LIKE ? OR model_code LIKE ?)")
-        needle = f"%{search.strip()}%"
-        params.extend([needle, needle, needle])
-    where_sql = " WHERE " + " AND ".join(where) if where else ""
-    cur.execute(
-        f"""SELECT id, sku_code, name, model_code, width_cm, fabric_code, color_code,
-                is_active, created_at, updated_at
-           FROM sku_catalog
-           {where_sql}
-           ORDER BY updated_at DESC, id DESC""",
-        params,
-    )
-    rows = cur.fetchall()
-    conn.close()
-    return [dict(row) for row in (rows or [])]
-
-
-def create_sku_catalog_item(
-    sku_code: str,
-    name: str,
-    model_code: str,
-    width_cm: int,
-    fabric_code: str,
-    color_code: str,
-    is_active: int = 1,
-) -> int:
-    """
-    Создаёт новую запись SKU в каталоге.
-
-    Мы пишем timestamps в секундах, чтобы можно было сортировать и фильтровать.
-    """
     ts = int(time.time())
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """INSERT INTO sku_catalog(
-               sku_code, name, model_code, width_cm, fabric_code, color_code,
-               is_active, created_at, updated_at
-           )
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [
-            sku_code,
-            name,
-            model_code,
-            int(width_cm),
-            fabric_code,
-            color_code,
-            int(is_active),
-            ts,
-            ts,
-        ],
-    )
-    sku_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return int(sku_id or 0)
-
-
-def update_sku_catalog_item(
-    sku_id: int,
-    name: str | None = None,
-    is_active: int | None = None,
-) -> None:
-    """
-    Обновляет поля name / is_active у SKU.
-
-    Другие поля не трогаем, чтобы не ломать код SKU.
-    """
-    fields = []
-    params: list = []
-    if name is not None:
-        fields.append("name=?")
-        params.append(name)
-    if is_active is not None:
-        fields.append("is_active=?")
-        params.append(int(is_active))
-    if not fields:
-        return
-    fields.append("updated_at=?")
-    params.append(int(time.time()))
-    params.append(int(sku_id))
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        f"UPDATE sku_catalog SET {', '.join(fields)} WHERE id=?",
-        params,
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_active_sku_codes() -> set[str]:
-    """
-    Возвращает множество активных SKU из каталога.
-
-    Используем set для быстрых проверок при импорте CSV.
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT sku_code FROM sku_catalog WHERE is_active=1")
-    rows = cur.fetchall()
-    conn.close()
-    return {row["sku_code"] for row in (rows or [])}
-
-
-def get_report_rows(report_type: str, date_from: str, date_to: str) -> list[dict]:
-    """
-    Формирует строки отчёта по типу и диапазону дат.
-
-    Мы возвращаем простые словари, чтобы API мог легко
-    строить CSV/XLSX без дополнительной обработки.
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-
-    # Даты приходят строками YYYY-MM-DD, превращаем их в unix time (секунды).
-    # Это простой и понятный формат для SQL-фильтров по времени.
-    start_ts = int(time.mktime(time.strptime(date_from, "%Y-%m-%d")))
-    end_ts = int(time.mktime(time.strptime(date_to, "%Y-%m-%d"))) + 86399
-
-    if report_type == "employees":
-        cur.execute(
-            """SELECT worker_id,
-                      COUNT(*) AS packed_count,
-                      COALESCE(SUM(worktime_sec), 0) AS worktime_sec,
-                      COALESCE(SUM(downtime_sec), 0) AS downtime_sec
-               FROM sessions
-               WHERE start_time BETWEEN ? AND ?
-               GROUP BY worker_id
-               ORDER BY packed_count DESC""",
-            [start_ts, end_ts],
-        )
-        rows = cur.fetchall() or []
+    try:
+        cur.execute("BEGIN")
+        # Сначала очищаем очередь, чтобы не оставлять "старые" позиции.
+        cur.execute("DELETE FROM queue_items")
+        for idx, item in enumerate(items, start=1):
+            cur.execute(
+                """INSERT INTO queue_items(sku_code, qty, position, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [
+                    item["sku_code"],
+                    int(item["qty"]),
+                    idx,
+                    ts,
+                    ts,
+                ],
+            )
+        conn.commit()
+    except Exception:
+        # Любая ошибка — откат, чтобы очередь оставалась в прежнем состоянии.
+        conn.rollback()
+        raise
+    finally:
         conn.close()
-        return [dict(row) for row in rows]
-
-    if report_type == "sku":
-        cur.execute(
-            """SELECT product_code AS sku,
-                      COUNT(*) AS packed_count
-               FROM sessions
-               WHERE start_time BETWEEN ? AND ?
-               GROUP BY product_code
-               ORDER BY packed_count DESC""",
-            [start_ts, end_ts],
-        )
-        rows = cur.fetchall() or []
-        conn.close()
-        return [dict(row) for row in rows]
-
-    # Отчёт по сменам: даём по каждой смене краткую сводку.
-    cur.execute(
-        """SELECT shift_id,
-                  worker_id,
-                  MIN(start_time) AS start_time,
-                  MAX(finish_time) AS finish_time,
-                  COUNT(*) AS packed_count
-           FROM sessions
-           WHERE start_time BETWEEN ? AND ?
-           GROUP BY shift_id, worker_id
-           ORDER BY start_time DESC""",
-        [start_ts, end_ts],
-    )
-    rows = cur.fetchall() or []
-    conn.close()
-    return [dict(row) for row in rows]
 
 
 def save_session(session) -> int:

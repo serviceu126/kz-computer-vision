@@ -5,7 +5,7 @@
 /* Список утверждённых компонентных классов:
    - panel / panel-header / panel-title / panel-title--compact / panel-main / panel-main--compact / panel-body: базовая карточка.
    - panel--camera / panel--instruction / panel--pack / panel--shift-plan / panel--settings / panel--steps / panel--events / panel--stats: варианты панели.
-   - pill-btn / pill-btn--primary / pill-btn--danger / pill-btn--ghost / pill-btn--active / pill-btn--disabled / pill-btn--mini: кнопки-пилюли.
+   - pill-btn / pill-btn--primary / pill-btn--danger / pill-btn--ghost / pill-btn--active / pill-btn--disabled / pill-btn--mini / pill-btn--import: кнопки-пилюли.
    - pill-row / pill-row--start: ряды кнопок.
    - tabbar / tab / tab--active: вкладки.
    - modal / modal-backdrop / modal-content / modal-title / modal-sub / modal-scan / modal-actions / modal-actions--footer: модальные окна.
@@ -419,6 +419,11 @@ body:not(.is-master-active) .screen--master {
 /* Скрытый input для выбора файла: кнопка-пилюля запускает клик. */
 .file-input-hidden {
   display: none;
+}
+
+/* Специальная метка для кнопки импорта, чтобы подсветить действие мастера. */
+.pill-btn--import {
+  border: 1px dashed var(--neutral-700);
 }
 
 /* Элементы только для мастера скрываем, пока режим не активен. */

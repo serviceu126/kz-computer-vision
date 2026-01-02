@@ -1442,16 +1442,17 @@
                 <span>Редактировать список</span>
               </div>
               <!-- Импорт CSV доступен только мастеру и открывает системный выбор файла. -->
-              <div id="btnShiftPlanImport" class="pill-btn master-only master-only-hidden" role="button" tabindex="0">
+              <div id="btnShiftPlanImport" class="pill-btn pill-btn--import master-only master-only-hidden"
+                   role="button" tabindex="0">
                 <span class="dot"></span>
-                <span>Загрузить сменное задание (CSV)</span>
+                <span>Импорт сменного задания (CSV)</span>
               </div>
               <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
                 <span class="dot"></span>
                 <span>Выбрать из списка</span>
               </div>
             </div>
-            <input id="shiftPlanImportFile" class="file-input-hidden" type="file" accept=".csv" />
+            <input id="shiftPlanImportFile" class="file-input-hidden" type="file" accept=".csv,text/csv" />
             <div class="pack-meta">Текущий список на смену</div>
             <div class="shift-plan-list" id="shiftPlanList"></div>
             <datalist id="shiftPlanSkuCatalog"></datalist>
@@ -3357,48 +3358,61 @@ function mkModalBtn(text, kind, onClick) {
     });
   }
 
-  async function importShiftPlanCsv(file) {
+  async function syncQueueFromBackend() {
     /**
-     * Импортируем сменное задание из CSV через backend.
+     * Загружаем очередь с backend, чтобы UI показал актуальные данные.
      *
-     * Backend проверит права мастера и валидность SKU,
-     * поэтому здесь только отправляем файл и показываем результат.
+     * Это вызывается после импорта CSV, чтобы оператор сразу видел
+     * новый список SKU, уже сохранённый в базе.
      */
-    if (!file) return;
-    const formData = new FormData();
-    formData.append("file", file);
     try {
-      const resp = await fetch("/api/kiosk/shift_plan/import", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.status === "error") {
-        const errors = (data.errors || []).slice(0, 3);
-        const errorText = errors.length
-          ? errors.map((e) => `${e.sku || "—"}: ${e.error || e}`).join("; ")
-          : (data.detail || "Импорт не выполнен.");
-        showPackToast(`Импорт отменён. Ошибки: ${errorText}`);
-        return;
+      const resp = await fetch(API_QUEUE_URL);
+      if (!resp.ok) {
+        return false;
       }
+      const data = await resp.json().catch(() => ({}));
+      const items = (data.items || []).map((item) => ({
+        sku: item.sku_code,
+        qty: item.qty,
+      }));
 
-      const items = data.added_items || [];
-      const planName = "Импорт CSV";
-      const newPlan = {
-        id: Date.now(),
-        name: planName,
-        items,
-      };
-      shiftPlanList.unshift(newPlan);
-      shiftPlanSelected = newPlan;
+      if (shiftPlanSelected) {
+        shiftPlanSelected.name = "Очередь (сервер)";
+        shiftPlanSelected.items = items;
+      } else {
+        const newPlan = {
+          id: Date.now(),
+          name: "Очередь (сервер)",
+          items,
+        };
+        shiftPlanList.unshift(newPlan);
+        shiftPlanSelected = newPlan;
+      }
       shiftPlanSelectedSku = null;
       saveShiftPlansToStorage();
       renderShiftPlanPanel();
       renderPackPlanPreview();
-      showPackToast(`Импорт завершён: ${items.length} SKU, пропущено ${data.skipped || 0}.`);
+      return true;
     } catch (error) {
-      showPackToast("Ошибка сети: CSV не импортирован.");
+      return false;
     }
+  }
+
+  // Делаем синхронизацию доступной для kiosk.js.
+  window.syncQueueFromBackend = syncQueueFromBackend;
+
+  async function triggerShiftPlanImport(file) {
+    /**
+     * Передаём файл в kiosk.js, где живёт логика импорта.
+     *
+     * Это удерживает сетевую логику в одном месте и упрощает поддержку.
+     */
+    if (!file) return;
+    if (typeof window.importShiftPlanCsv !== "function") {
+      showPackToast("Импорт временно недоступен.");
+      return;
+    }
+    await window.importShiftPlanCsv(file);
   }
 
   if (btnManualToggle && manualControls) {
@@ -3434,7 +3448,7 @@ function mkModalBtn(text, kind, onClick) {
     });
     shiftPlanImportFile.addEventListener("change", () => {
       const file = shiftPlanImportFile.files && shiftPlanImportFile.files[0];
-      importShiftPlanCsv(file);
+      triggerShiftPlanImport(file);
       shiftPlanImportFile.value = "";
     });
   }

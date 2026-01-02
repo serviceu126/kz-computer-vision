@@ -1,12 +1,13 @@
 from pathlib import Path
 from typing import List, Optional, Literal
 import re
+import importlib.util
 import json
 import time
 import sqlite3
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import csv
@@ -31,12 +32,13 @@ from core.storage import (
     create_sku_catalog_item,
     update_sku_catalog_item,
     get_report_rows,
-    get_active_sku_codes,
+    get_sku_catalog_validation_data,
     list_queue_items,
     add_or_update_queue_item,
     update_queue_qty,
     remove_queue_item,
     reorder_queue_items,
+    replace_queue_items,
 )
 from services.packaging import (
     advance_phase,
@@ -371,6 +373,95 @@ def build_report_xlsx(rows: list[dict], headers: list[str]) -> bytes:
     return buffer.getvalue()
 
 
+def detect_csv_delimiter(sample_line: str) -> str:
+    """
+    Определяем разделитель CSV по первой строке.
+
+    Мы допускаем три варианта: запятая, точка с запятой, таб.
+    Выбираем тот, который встречается чаще остальных.
+    """
+    candidates = [",", ";", "\t"]
+    counts = {sep: sample_line.count(sep) for sep in candidates}
+    best = max(counts, key=counts.get)
+    return best if counts[best] > 0 else ","
+
+
+def parse_shift_plan_csv(
+    text: str,
+    active_sku_codes: set[str],
+    validate_against_catalog: bool,
+) -> tuple[list[dict], list[str]]:
+    """
+    Парсим CSV в список SKU с количеством.
+
+    Возвращаем:
+    - items: список словарей {sku_code, qty} в порядке появления;
+    - errors: список текстовых ошибок для пользователя.
+    """
+    errors: list[str] = []
+    aggregated: dict[str, int] = {}
+    order: list[str] = []
+
+    # Берём первую непустую строку, чтобы выбрать разделитель.
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return [], ["Файл пуст или не содержит данных."]
+
+    delimiter = detect_csv_delimiter(lines[0])
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+
+    # Проверяем, есть ли заголовок "sku_code, qty".
+    header = None
+    try:
+        header = next(reader)
+    except StopIteration:
+        return [], ["Файл пуст или не содержит данных."]
+
+    header_cells = [cell.strip().lower() for cell in header]
+    has_header = "sku_code" in header_cells and "qty" in header_cells
+
+    if not has_header:
+        # Если заголовка нет, возвращаемся на первую строку как на данные.
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+
+    for row in reader:
+        if not row or not any(cell.strip() for cell in row):
+            # Пропускаем полностью пустые строки.
+            continue
+        sku_raw = (row[0] if len(row) > 0 else "").strip()
+        qty_raw = (row[1] if len(row) > 1 else "").strip()
+        line_no = reader.line_num
+
+        if not sku_raw:
+            errors.append(f"Строка {line_no}: SKU не указан.")
+            continue
+        if not qty_raw:
+            errors.append(f"Строка {line_no}: количество не указано.")
+            continue
+        try:
+            qty_val = int(qty_raw)
+        except ValueError:
+            errors.append(f"Строка {line_no}: количество '{qty_raw}' не является числом.")
+            continue
+        if qty_val <= 0:
+            errors.append(f"Строка {line_no}: количество должно быть больше нуля.")
+            continue
+
+        if validate_against_catalog and sku_raw not in active_sku_codes:
+            errors.append(f"Строка {line_no}: SKU '{sku_raw}' отсутствует или неактивен в каталоге.")
+            continue
+
+        # Повторяющиеся SKU суммируем, а порядок берём по первой встрече.
+        if sku_raw not in aggregated:
+            aggregated[sku_raw] = qty_val
+            order.append(sku_raw)
+        else:
+            aggregated[sku_raw] += qty_val
+
+    items = [{"sku_code": sku, "qty": aggregated[sku]} for sku in order]
+    return items, errors
+
+
 def find_usb_mounts() -> list[Path]:
     """
     Ищем смонтированные USB-носители в типичных папках Linux.
@@ -494,6 +585,31 @@ async def get_state():
         master_id=master_id,
         master_active=bool(master_id),
     )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/master/login")
@@ -789,8 +905,8 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
     return {"status": "ok", "id": plan_id, "name": name, "count": len(items)}
 
 
-@app.post("/api/kiosk/shift_plan/import")
-async def shift_plan_import(request: Request):
+@app.post("/api/kiosk/shift_plan/import_csv")
+async def shift_plan_import_csv(request: Request):
     """
     Импорт сменного задания из CSV (только мастер).
 
@@ -798,78 +914,53 @@ async def shift_plan_import(request: Request):
     - sku_code, qty
     """
     ensure_master_mode()
-    shift_id = get_active_shift_id()
-    if not shift_id:
-        raise HTTPException(status_code=409, detail="Нет активной смены для импорта плана.")
+    update_master_activity()
 
+    # Проверяем наличие python-multipart только при попытке импорта,
+    # чтобы сервер мог запускаться без дополнительной зависимости.
+    if importlib.util.find_spec("multipart") is None:
+        raise HTTPException(
+            status_code=501,
+            detail="File upload requires python-multipart. Install it or use alternative import method.",
+        )
+
+    # Читаем файл из multipart формы.
     try:
-        import multipart  # noqa: F401
-    except ImportError as exc:
+        form = await request.form()
+    except Exception as exc:
         raise HTTPException(
             status_code=400,
-            detail="Нужен python-multipart для загрузки файлов.",
+            detail="Не удалось прочитать форму загрузки.",
         ) from exc
 
-    form = await request.form()
     file = form.get("file")
     if not file or not getattr(file, "filename", ""):
         raise HTTPException(status_code=400, detail="Файл не найден в запросе.")
-
-    if not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Нужен файл CSV.")
 
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Файл CSV пуст.")
 
-    text = content.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames or "sku_code" not in reader.fieldnames or "qty" not in reader.fieldnames:
-        raise HTTPException(status_code=400, detail="CSV должен содержать колонки sku_code и qty.")
+    # CSV читаем в Unicode, чтобы корректно обрабатывать кириллицу.
+    text = content.decode("utf-8-sig", errors="replace")
 
-    active_skus = get_active_sku_codes()
-    errors = []
-    skipped = 0
-    aggregated: dict[str, int] = {}
-
-    for idx, row in enumerate(reader, start=2):
-        sku = (row.get("sku_code") or "").strip()
-        qty_raw = (row.get("qty") or "").strip()
-        if not sku or not qty_raw:
-            skipped += 1
-            continue
-        if sku not in active_skus:
-            errors.append({"row": idx, "sku": sku, "error": "SKU не найден или не активен."})
-            continue
-        try:
-            qty = int(qty_raw)
-        except ValueError:
-            errors.append({"row": idx, "sku": sku, "error": "Количество должно быть целым числом."})
-            continue
-        if qty <= 0:
-            errors.append({"row": idx, "sku": sku, "error": "Количество должно быть больше нуля."})
-            continue
-        aggregated[sku] = aggregated.get(sku, 0) + qty
+    # Сначала берём список активных SKU, если каталог вообще есть.
+    active_skus, has_catalog = get_sku_catalog_validation_data()
+    items, errors = parse_shift_plan_csv(text, active_skus, has_catalog)
 
     if errors:
-        # Если есть ошибки, ничего не применяем — импорт атомарный.
-        return {"status": "error", "added_items": 0, "skipped": skipped, "errors": errors}
+        # Если есть ошибки — ничего не меняем, импорт атомарный.
+        return JSONResponse(status_code=400, content={"ok": False, "errors": errors})
 
-    items = [{"sku": sku, "qty": qty} for sku, qty in aggregated.items()]
     if not items:
-        return {"status": "error", "added_items": 0, "skipped": skipped, "errors": ["Нет валидных строк."]}
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "errors": ["Нет валидных строк."]},
+        )
 
-    name = f"Импорт CSV {time.strftime('%Y-%m-%d %H:%M')}"
-    plan_id = create_shift_plan(
-        shift_id=shift_id,
-        name=name,
-        created_at=time.time(),
-        items_json=json.dumps(items, ensure_ascii=False),
-    )
-    # Новый импорт становится текущим планом смены,
-    # чтобы оператор сразу видел обновлённый список.
-    shift_plans.select_plan(shift_id, plan_id)
-    return {"status": "ok", "added_items": items, "skipped": skipped, "errors": []}
+    # Полностью заменяем очередь, чтобы на смене был только новый список.
+    replace_queue_items(items)
+    return {"ok": True, "imported_count": len(items), "errors": []}
 
 
 @app.get("/api/kiosk/pack/plan/list")
