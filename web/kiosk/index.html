@@ -2773,6 +2773,8 @@ document.getElementById("bedDetails").textContent =
     shiftPlanList.unshift(newPlan);
     shiftPlanSelected = newPlan;
     shiftPlanSelectedSku = null;
+    // Учительская подсказка: сбрасываем хеш, чтобы новый план точно перерисовался.
+    lastRenderedPlanHash = "";
     saveShiftPlansToStorage();
     renderShiftPlanPanel();
     renderShiftPlanList(shiftPlanSelected.items);
