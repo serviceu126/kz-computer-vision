@@ -48,6 +48,7 @@
   const skuCatalogModalBackdrop = document.getElementById("skuCatalogModalBackdrop");
   const skuCatalogModalTitle = document.getElementById("skuCatalogModalTitle");
   const skuCatalogModalActions = document.getElementById("skuCatalogModalActions");
+  const skuCatalogModalError = document.getElementById("skuCatalogModalError");
   const skuCatalogModalCancel = document.getElementById("skuCatalogModalCancel");
   const skuModelCode = document.getElementById("skuModelCode");
   const skuWidthCm = document.getElementById("skuWidthCm");
@@ -79,7 +80,7 @@
   let masterTimeoutId = null;
   let skuModalOpen = false;
   let skuModalMode = "create";
-  let skuEditingId = null;
+  let skuEditingCode = null;
   // Учительская заметка: каталог SKU нужен всему UI, поэтому держим его в window.
   window.kzSkuCatalog = Array.isArray(window.kzSkuCatalog) ? window.kzSkuCatalog : [];
 
@@ -89,6 +90,46 @@
      * чтобы сравнение не ломалось из-за null/undefined.
      */
     return (value || "").toString().trim();
+  }
+
+  function normalizeSkuModel(value) {
+    /**
+     * Учительская подсказка: модель храним в виде трёх цифр.
+     *
+     * Так мы сохраняем единый вид "001", чтобы SKU всегда совпадал с каталогом.
+     */
+    const raw = String(value || "").trim();
+    return /^\d{1,3}$/.test(raw) ? raw.padStart(3, "0") : raw;
+  }
+
+  function normalizeSkuWidth(value) {
+    /**
+     * Учительская подсказка: приводим ширину к каноническому виду.
+     *
+     * Почему так:
+     * - канон SKU использует размер "16", а в поле могут ввести "160";
+     * - если число похоже на сантиметры (>= 100 и кратно 10),
+     *   мы переводим его в размерный код, чтобы SKU был единым.
+     */
+    const raw = String(value || "").trim();
+    const widthValue = parseInt(raw || "0", 10);
+    if (!Number.isFinite(widthValue) || widthValue <= 0) {
+      return "";
+    }
+    if (widthValue >= 100 && widthValue % 10 === 0) {
+      return String(widthValue / 10);
+    }
+    return String(widthValue);
+  }
+
+  function setSkuModalError(message) {
+    /**
+     * Учительская подсказка: показываем ошибку прямо в модалке,
+     * чтобы оператор видел причину и не терял контекст.
+     */
+    if (!skuCatalogModalError) return;
+    skuCatalogModalError.textContent = message || "";
+    skuCatalogModalError.style.display = message ? "block" : "none";
   }
 
   window.findSku = (code) => {
@@ -505,10 +546,9 @@
      * Это важно, чтобы каталог и очередь всегда использовали один вид SKU.
      */
     const modelRaw = (skuModelCode?.value || "").trim();
-    const model = /^\d{1,3}$/.test(modelRaw) ? modelRaw.padStart(3, "0") : modelRaw;
+    const model = normalizeSkuModel(modelRaw);
     const widthRaw = (skuWidthCm?.value || "").trim();
-    const widthValue = parseInt(widthRaw || "0", 10);
-    const width = Number.isFinite(widthValue) && widthValue > 0 ? String(widthValue) : "";
+    const width = normalizeSkuWidth(widthRaw);
     const fabric = (skuFabricCode?.value || "").trim();
     const colorRaw = (skuColorCode?.value || "").trim();
     const color = colorRaw ? colorRaw.padStart(2, "0").slice(-2) : "";
@@ -545,7 +585,8 @@
   function openSkuModal(mode, item = null) {
     skuModalOpen = true;
     skuModalMode = mode;
-    skuEditingId = item ? item.id : null;
+    skuEditingCode = item ? item.sku_code : null;
+    setSkuModalError("");
     if (skuCatalogModalBackdrop) {
       skuCatalogModalBackdrop.classList.add("open");
       skuCatalogModalBackdrop.setAttribute("aria-hidden", "false");
@@ -583,6 +624,7 @@
 
   function closeSkuModal() {
     skuModalOpen = false;
+    setSkuModalError("");
     if (skuCatalogModalBackdrop) {
       skuCatalogModalBackdrop.classList.remove("open");
       skuCatalogModalBackdrop.setAttribute("aria-hidden", "true");
@@ -920,16 +962,19 @@
     /**
      * Учительская подсказка: удаление подтверждаем, чтобы избежать случайных потерь.
      */
-    if (!item || !item.id) return;
+    if (!item || !item.sku_code) return;
     const ok = window.confirm(`Удалить SKU ${item.sku_code}?`);
     if (!ok) return;
     try {
-      const resp = await fetch(`${API_SKU_URL}/${item.id}`, { method: "DELETE" });
+      const resp = await fetch(`${API_SKU_CATALOG_URL}/${encodeURIComponent(item.sku_code)}`, {
+        method: "DELETE",
+      });
       if (!resp.ok) {
         window.showPackToast?.("Не удалось удалить SKU.");
         return;
       }
       fetchSkuCatalog();
+      await window.loadSkuCatalog?.();
     } catch (error) {
       window.showPackToast?.("Ошибка сети: SKU не удалён.");
     }
@@ -945,75 +990,52 @@
     /**
      * Создаём или обновляем SKU.
      *
-     * В режиме редактирования меняем только имя и активность.
+     * В режиме редактирования используем предыдущий sku_code,
+     * чтобы явно обновить существующую запись.
      */
-    if (skuModalMode === "edit" && skuEditingId) {
-      const skuCode = buildSkuPreview();
-      if (!validateSkuCanonical(skuCode)) {
-        window.showPackToast?.("Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.");
-        return;
-      }
-      const payload = {
-        sku_code: skuCode,
-        name: (skuName?.value || "").trim(),
-        model_code: (skuModelCode?.value || "").trim(),
-        width_cm: parseInt(skuWidthCm?.value || "0", 10),
-        fabric_code: (skuFabricCode?.value || "").trim(),
-        color_code: (skuColorCode?.value || "").trim(),
-        is_active: !!skuIsActive?.checked,
-      };
-      try {
-        const resp = await fetch(`${API_SKU_URL}/${skuEditingId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          window.showPackToast?.(detail.detail || "Не удалось сохранить SKU.");
-          return;
-        }
-        closeSkuModal();
-        fetchSkuCatalog();
-      } catch (error) {
-        window.showPackToast?.("Ошибка сети: SKU не сохранён.");
-      }
-      return;
-    }
-
+    setSkuModalError("");
     const skuCode = buildSkuPreview();
+    const normalizedWidth = normalizeSkuWidth(skuWidthCm?.value || "");
     const payload = {
       sku_code: skuCode,
       name: (skuName?.value || "").trim(),
-      model_code: (skuModelCode?.value || "").trim(),
-      width_cm: parseInt(skuWidthCm?.value || "0", 10),
+      model_code: normalizeSkuModel(skuModelCode?.value || ""),
+      width_cm: normalizedWidth ? parseInt(normalizedWidth, 10) : 0,
       fabric_code: (skuFabricCode?.value || "").trim(),
       color_code: (skuColorCode?.value || "").trim(),
       is_active: !!skuIsActive?.checked,
     };
     if (!payload.sku_code || !payload.name) {
-      window.showPackToast?.("Заполните код SKU и название.");
+      setSkuModalError("Заполните код SKU и название.");
       return;
     }
     if (!validateSkuCanonical(payload.sku_code)) {
-      window.showPackToast?.("Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.");
+      setSkuModalError("Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.");
+      return;
+    }
+    if (!payload.width_cm) {
+      setSkuModalError("Укажите ширину, чтобы SKU был полным.");
       return;
     }
     try {
-      const resp = await fetch(API_SKU_URL, {
+      const body = skuModalMode === "edit" && skuEditingCode
+        ? { ...payload, previous_sku_code: skuEditingCode }
+        : payload;
+      const resp = await fetch(API_SKU_CATALOG_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body),
       });
-      if (!resp.ok) {
-        const detail = await resp.json().catch(() => ({}));
-        window.showPackToast?.(detail.detail || "Не удалось добавить SKU.");
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) {
+        setSkuModalError(data.detail || "Не удалось сохранить SKU.");
         return;
       }
       closeSkuModal();
       fetchSkuCatalog();
+      await window.loadSkuCatalog?.();
     } catch (error) {
-      window.showPackToast?.("Ошибка сети: SKU не добавлен.");
+      setSkuModalError("Ошибка сети: SKU не сохранён.");
     }
   }
 

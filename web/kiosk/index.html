@@ -976,6 +976,10 @@
       color: var(--text-muted);
     }
 
+    .settings-hint--danger {
+      color: var(--danger-text);
+    }
+
     .settings-row input[type="checkbox"] {
       width: var(--space-2xl);
       height: var(--space-2xl);
@@ -1907,6 +1911,7 @@
         </div>
       </div>
       <div class="modal-actions" id="skuCatalogModalActions"></div>
+      <div id="skuCatalogModalError" class="settings-hint settings-hint--danger" role="alert"></div>
       <div class="modal-actions modal-actions--footer">
         <div id="skuCatalogModalCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
           <span class="dot"></span>
