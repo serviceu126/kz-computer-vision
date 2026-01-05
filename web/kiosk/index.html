@@ -976,6 +976,10 @@
       color: var(--text-muted);
     }
 
+    .settings-hint--danger {
+      color: var(--danger-text);
+    }
+
     .settings-row input[type="checkbox"] {
       width: var(--space-2xl);
       height: var(--space-2xl);
@@ -1169,7 +1173,7 @@
                 </div>
                 <div id="btnMasterLogout" class="pill-btn master-hidden" role="button" tabindex="0">
                   <span class="dot"></span>
-                  <span>Выйти (мастер)</span>
+                  <span>Выйти как мастер</span>
                 </div>
               </div>
             </div>
@@ -1907,6 +1911,7 @@
         </div>
       </div>
       <div class="modal-actions" id="skuCatalogModalActions"></div>
+      <div id="skuCatalogModalError" class="settings-hint settings-hint--danger" role="alert"></div>
       <div class="modal-actions modal-actions--footer">
         <div id="skuCatalogModalCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
           <span class="dot"></span>
@@ -1952,6 +1957,10 @@
   let shiftPlanSelectedSku = null;
   let manualModeEnabled = false;
   let shiftPlanCatalogFilter = "";
+  let shiftPlanUserActive = false;
+  let shiftPlanUserActiveTimer = null;
+  let shiftPlanPanelSignature = "";
+  let lastRenderedPlanHash = "";
 
   // Настройки прав оператора приходят из backend.
   // Здесь держим их как единый объект, чтобы функции могли опираться на них.
@@ -1973,6 +1982,147 @@
     renderShiftPlanList(shiftPlanSelected ? shiftPlanSelected.items : []);
     renderPackPlanPreview();
   };
+
+  function saveScrollPositions() {
+    /**
+     * Учительская подсказка: сохраняем скролл контейнеров очереди,
+     * чтобы автообновление не "прыгало" при перерисовке DOM.
+     */
+    const targets = [
+      document.getElementById("shiftPlanList"),
+      document.getElementById("shiftPlanCatalogList"),
+      document.getElementById("shiftPlanCard"),
+    ].filter(Boolean);
+    const map = {};
+    targets.forEach((el) => {
+      if (!el.id) return;
+      map[el.id] = { top: el.scrollTop, left: el.scrollLeft };
+    });
+    return map;
+  }
+
+  function restoreScrollPositions(map) {
+    /**
+     * Учительская подсказка: возвращаем скролл ровно туда,
+     * где оператор остановился, чтобы UI не сбивал работу.
+     */
+    if (!map) return;
+    Object.keys(map).forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.scrollTop = map[id].top || 0;
+      el.scrollLeft = map[id].left || 0;
+    });
+  }
+
+  function getActiveElementInfo() {
+    /**
+     * Учительская подсказка: сохраняем фокус, если оператор вводит данные.
+     * Это предотвращает потерю курсора при автоперерисовке.
+     */
+    const active = document.activeElement;
+    const shiftPlanCard = document.getElementById("shiftPlanCard");
+    if (!active || !active.id || !shiftPlanCard || !shiftPlanCard.contains(active)) {
+      return null;
+    }
+    const info = { id: active.id };
+    if ("selectionStart" in active && "selectionEnd" in active) {
+      info.selectionStart = active.selectionStart;
+      info.selectionEnd = active.selectionEnd;
+    }
+    return info;
+  }
+
+  function restoreActiveElement(info) {
+    /**
+     * Учительская подсказка: возвращаем фокус и позицию курсора,
+     * чтобы оператор продолжил ввод без "скачков".
+     */
+    if (!info || !info.id) return;
+    const el = document.getElementById(info.id);
+    if (!el) return;
+    el.focus();
+    if ("selectionStart" in el && info.selectionStart !== undefined) {
+      el.selectionStart = info.selectionStart;
+      el.selectionEnd = info.selectionEnd;
+    }
+  }
+
+  function isShiftPlanTabActive() {
+    /**
+     * Учительская подсказка: проверяем, что вкладка "Очередь" активна,
+     * иначе не блокируем обновление интерфейса.
+     */
+    const tab = document.getElementById("tab-queue");
+    return tab && tab.getAttribute("data-active") === "true";
+  }
+
+  function markShiftPlanUserActive() {
+    /**
+     * Учительская подсказка: фиксируем активность пользователя
+     * и сбрасываем её через короткую паузу без действий.
+     */
+    shiftPlanUserActive = true;
+    if (shiftPlanUserActiveTimer) {
+      clearTimeout(shiftPlanUserActiveTimer);
+    }
+    shiftPlanUserActiveTimer = setTimeout(() => {
+      shiftPlanUserActive = false;
+    }, 1500);
+  }
+
+  function buildShiftPlanSignature() {
+    /**
+     * Учительская подсказка: собираем сигнатуру данных очереди,
+     * чтобы лишний раз не трогать DOM без реальных изменений.
+     */
+    const items = shiftPlanSelected?.items || [];
+    return JSON.stringify({
+      selectedId: shiftPlanSelected?.id || 0,
+      selectedName: shiftPlanSelected?.name || "",
+      selectedSku: shiftPlanSelectedSku || "",
+      items: items.map((item) => [normalizeShiftPlanSku(item.sku), item.qty]),
+      permissions: {
+        reorder: operatorSettings.allow_reorder_queue,
+        qty: operatorSettings.allow_change_qty,
+        remove: operatorSettings.allow_remove_sku,
+        add: operatorSettings.allow_add_from_catalog,
+        manual: operatorSettings.allow_manual_mode,
+        skip: operatorSettings.allow_skip_sku,
+      },
+    });
+  }
+
+  function normalizeShiftPlanSku(value) {
+    /**
+     * Учительская подсказка: приводим SKU к канону внутри очереди,
+     * чтобы различие разделителей не сбивало сравнение списков.
+     */
+    const text = (value || "").toString().trim();
+    const legacy = /^(MM\.Кровать\.\d{3}-\d{1,3})-([A-Za-z0-9]+)\.(\d{2})$/;
+    const match = text.match(legacy);
+    if (match) {
+      return `${match[1]}.${match[2]}.${match[3]}`;
+    }
+    return text;
+  }
+
+  function renderShiftPlanPanelAuto(options = {}) {
+    /**
+     * Учительская подсказка: автообновление очереди не должно
+     * сбивать прокрутку и фокус при активной работе пользователя.
+     */
+    const shouldDefer = isShiftPlanTabActive() && shiftPlanUserActive && !options.force;
+    if (shouldDefer) return;
+    const signature = buildShiftPlanSignature();
+    if (!options.force && signature === shiftPlanPanelSignature) return;
+    const scrollMap = saveScrollPositions();
+    const activeInfo = getActiveElementInfo();
+    renderShiftPlanPanel();
+    shiftPlanPanelSignature = signature;
+    restoreScrollPositions(scrollMap);
+    restoreActiveElement(activeInfo);
+  }
   let btnPackStart = null;
   let btnPackStepComplete = null;
   let btnPackPhaseNext = null;
@@ -2097,8 +2247,9 @@
     if (masterStatusEl) {
       masterStatusEl.textContent = masterId ? `Мастер: ${masterId}` : "Мастер: —";
     }
-    if (btnMasterLogout) {
-      btnMasterLogout.classList.toggle("master-hidden", !masterId);
+    if (typeof window.updateMasterActionButtons === "function") {
+      // Учительская подсказка: кнопки входа/выхода рендерим по текущему state.
+      window.updateMasterActionButtons(!!masterId);
     }
     if (window.syncMasterState) {
       window.syncMasterState(masterId);
@@ -2286,6 +2437,9 @@ document.getElementById("bedDetails").textContent =
       if (!resp.ok) return;
       const data = await resp.json();
       data.client_timestamp = Date.now() / 1000;
+      // Учительская подсказка: перед обновлением UI бережно
+      // обновляем очередь, если это не мешает оператору.
+      renderShiftPlanPanelAuto();
       renderState(data);
     } catch (e) {
       console.warn("Ошибка получения состояния киоска:", e);
@@ -2357,7 +2511,7 @@ document.getElementById("bedDetails").textContent =
       shiftPlanList = [];
       shiftPlanSelected = null;
     }
-    renderShiftPlanPanel();
+    renderShiftPlanPanelAuto();
     renderPackPlanPreview();
   }
 
@@ -2525,6 +2679,9 @@ document.getElementById("bedDetails").textContent =
     }
     renderShiftPlanList(shiftPlanSelected.items);
     updateShiftPlanControlsAvailability();
+    // Учительская подсказка: фиксируем актуальную сигнатуру,
+    // чтобы автообновление не дублировало рендер без изменений.
+    shiftPlanPanelSignature = buildShiftPlanSignature();
   }
 
   function formatShiftPlanTimestamp(value) {
@@ -2576,8 +2733,8 @@ document.getElementById("bedDetails").textContent =
 
   async function fetchShiftPlanFromBackend() {
     /**
-     * Учительская подсказка: подгружаем активный план из базы,
-     * чтобы оператор видел актуальный список даже без редактирования.
+     * Учительская подсказка: читаем статус плана ТОЛЬКО для подсказок,
+     * не трогая ручной список (shiftPlanSelected) и localStorage.
      */
     try {
       const resp = await fetch("/api/kiosk/shift_plan", { cache: "no-store" });
@@ -2586,27 +2743,7 @@ document.getElementById("bedDetails").textContent =
       const plan = data.plan || null;
       const unknown = data.unknown_skus || [];
       renderShiftPlanStatus(plan, unknown);
-      if (!plan) {
-        shiftPlanSelected = null;
-        shiftPlanSelectedSku = null;
-        renderShiftPlanPanel();
-        renderPackPlanPreview();
-        return;
-      }
-
-      const items = (plan.items || []).map((item) => ({
-        sku: item.sku_code,
-        qty: item.qty,
-        position: item.position,
-      }));
-      shiftPlanSelected = {
-        id: plan.id,
-        name: plan.plan_name || "Сменное задание",
-        items: items.sort((a, b) => a.position - b.position),
-      };
-      shiftPlanSelectedSku = null;
-      renderShiftPlanPanel();
-      renderPackPlanPreview();
+      // Важно: не перетираем shiftPlanSelected и не сбрасываем выбор.
     } catch (error) {
       console.warn("Не удалось получить сменный план:", error);
     }
@@ -2615,6 +2752,33 @@ document.getElementById("bedDetails").textContent =
   // Делаем обновление доступным снаружи (из kiosk.js).
   window.refreshShiftPlanFromBackend = fetchShiftPlanFromBackend;
 
+  window.applyImportedShiftPlanToLocal = async (data) => {
+    /**
+     * Учительская подсказка: применяем импорт только после успешного ответа,
+     * чтобы ручной список не перетирался фоновым polling.
+     */
+    const normalizedItems = Array.isArray(data?.normalized_items) ? data.normalized_items : [];
+    if (!normalizedItems.length) {
+      showPackToast("Импорт завершён, но список пуст.");
+      return;
+    }
+    const newPlan = {
+      id: Date.now(),
+      name: data?.plan_name || "Сменное задание",
+      items: normalizedItems.map((item) => ({
+        sku: item.sku_code,
+        qty: item.qty,
+      })),
+    };
+    shiftPlanList.unshift(newPlan);
+    shiftPlanSelected = newPlan;
+    shiftPlanSelectedSku = null;
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderShiftPlanList(shiftPlanSelected.items);
+    renderPackPlanPreview();
+  };
+
   function renderShiftPlanList(items) {
     /**
      * Рисуем текущий список SKU на смену.
@@ -2622,6 +2786,18 @@ document.getElementById("bedDetails").textContent =
      */
     const listEl = document.getElementById("shiftPlanList");
     if (!listEl) return;
+    const hash = JSON.stringify(
+      (items || []).map((item) => [
+        normalizeShiftPlanSku(item.sku),
+        item.qty,
+        item.position,
+      ])
+    );
+    if (hash === lastRenderedPlanHash) {
+      return;
+    }
+    const scrollTop = listEl.scrollTop;
+    const selectedSku = shiftPlanSelectedSku;
     listEl.innerHTML = "";
 
     if (!items || !items.length) {
@@ -2635,6 +2811,7 @@ document.getElementById("bedDetails").textContent =
     items.forEach((item) => {
       const row = document.createElement("div");
       row.className = "shift-plan-row";
+      row.dataset.sku = normalizeShiftPlanSku(item.sku);
       if (shiftPlanSelectedSku === item.sku) {
         row.classList.add("selected");
       }
@@ -2643,7 +2820,7 @@ document.getElementById("bedDetails").textContent =
       skuEl.className = "shift-plan-sku";
       const skuCodeEl = document.createElement("div");
       skuCodeEl.className = "shift-plan-sku-code";
-      skuCodeEl.textContent = item.sku;
+      skuCodeEl.textContent = normalizeShiftPlanSku(item.sku);
       const skuMeta = getSkuMeta(item.sku);
       if (skuMeta && skuMeta.name) {
         const skuNameEl = document.createElement("div");
@@ -2658,7 +2835,8 @@ document.getElementById("bedDetails").textContent =
       });
 
       const qtyEl = document.createElement("div");
-      qtyEl.textContent = `×${item.qty}`;
+      qtyEl.className = "shift-plan-qty";
+      qtyEl.textContent = buildShiftPlanQtyLabel(item);
 
       const minusBtn = document.createElement("div");
       minusBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
@@ -2721,6 +2899,47 @@ document.getElementById("bedDetails").textContent =
     });
 
     updateShiftPlanControlsAvailability();
+    lastRenderedPlanHash = hash;
+    if (selectedSku && items.some((item) => item.sku === selectedSku)) {
+      shiftPlanSelectedSku = selectedSku;
+    }
+    listEl.scrollTop = scrollTop;
+  }
+
+  function buildShiftPlanQtyLabel(item) {
+    /**
+     * Учительская подсказка: формируем короткую подпись для количества,
+     * чтобы оператор видел и план, и прогресс без отдельной верстки.
+     */
+    const qty = item?.qty ?? 0;
+    const remaining = item?.remaining_qty;
+    if (remaining === undefined || remaining === null) {
+      return `×${qty}`;
+    }
+    return `×${qty} • осталось ${remaining}`;
+  }
+
+  function updateShiftPlanProgress(items) {
+    /**
+     * Учительская подсказка: обновляем только числа прогресса,
+     * не пересоздавая весь список и не сбивая фокус/скролл.
+     */
+    const listEl = document.getElementById("shiftPlanList");
+    if (!listEl) return;
+    const map = new Map();
+    (items || []).forEach((item) => {
+      map.set(normalizeShiftPlanSku(item.sku), buildShiftPlanQtyLabel(item));
+    });
+    listEl.querySelectorAll(".shift-plan-row").forEach((row) => {
+      const sku = row.dataset.sku || "";
+      if (!map.has(sku)) return;
+      const qtyEl = row.querySelector(".shift-plan-qty");
+      if (!qtyEl) return;
+      const nextText = map.get(sku);
+      if (qtyEl.textContent !== nextText) {
+        qtyEl.textContent = nextText;
+      }
+    });
   }
 
   function applyOperatorSettings(settings) {
@@ -3546,6 +3765,7 @@ function mkModalBtn(text, kind, onClick) {
   const shiftPlanRenameInput = document.getElementById("shiftPlanRenameInput");
   const btnShiftPlanRename = document.getElementById("btnShiftPlanRename");
   const shiftPlanCatalogSearch = document.getElementById("shiftPlanCatalogSearch");
+  const shiftPlanCard = document.getElementById("shiftPlanCard");
 
   if (btnPackStart) {
     btnPackStart.addEventListener("click", () => {
@@ -3586,10 +3806,8 @@ function mkModalBtn(text, kind, onClick) {
 
   async function syncQueueFromBackend() {
     /**
-     * Загружаем сменный план с backend, чтобы UI показал актуальные данные.
-     *
-     * Это вызывается после импорта файла, чтобы оператор сразу увидел
-     * новый список SKU, уже сохранённый в базе.
+     * Учительская подсказка: оставляем синхронизацию статуса,
+     * но не трогаем ручной список оператора.
      */
     try {
       await fetchShiftPlanFromBackend();
@@ -3609,6 +3827,7 @@ function mkModalBtn(text, kind, onClick) {
      * Это удерживает сетевую логику в одном месте и упрощает поддержку.
      */
     if (!file) return;
+    window.showPackToast?.(`Файл выбран: ${file.name}. Начинаю импорт...`);
     const isMasterActive = document.body.classList.contains("is-master-active");
     if (!isMasterActive && !operatorSettings.allow_shift_plan_import) {
       showPackToast("Импорт запрещен настройками мастера.");
@@ -3618,6 +3837,7 @@ function mkModalBtn(text, kind, onClick) {
       showPackToast("Импорт временно недоступен.");
       return;
     }
+    console.log("Импорт сменного задания: отправляем файл на backend.");
     await window.importShiftPlanFile(file);
   }
 
@@ -3643,7 +3863,8 @@ function mkModalBtn(text, kind, onClick) {
   if (btnShiftPlanUpload) {
     btnShiftPlanUpload.addEventListener("click", () => openShiftPlanUploadModal());
   }
-  if (btnShiftPlanImport && shiftPlanImportFile) {
+  if (btnShiftPlanImport && shiftPlanImportFile && !btnShiftPlanImport.dataset.bound) {
+    btnShiftPlanImport.dataset.bound = "1";
     btnShiftPlanImport.addEventListener("click", () => {
       /**
        * Открываем системный выбор файла.
@@ -3656,27 +3877,46 @@ function mkModalBtn(text, kind, onClick) {
       }
       shiftPlanImportFile.click();
     });
-    shiftPlanImportFile.addEventListener("change", () => {
-      const file = shiftPlanImportFile.files && shiftPlanImportFile.files[0];
-      triggerShiftPlanImport(file);
-      shiftPlanImportFile.value = "";
-    });
+    if (!shiftPlanImportFile.dataset.bound) {
+      shiftPlanImportFile.dataset.bound = "1";
+      shiftPlanImportFile.addEventListener("change", async () => {
+        const file = shiftPlanImportFile.files && shiftPlanImportFile.files[0];
+        shiftPlanImportFile.value = "";
+        if (!file) return;
+        try {
+          await triggerShiftPlanImport(file);
+        } catch (error) {
+          showPackToast(`Ошибка импорта: ${error}`);
+        }
+      });
+    }
   }
-  if (btnShiftPlanUploadMaster && shiftPlanFileInput) {
+  if (btnShiftPlanUploadMaster && shiftPlanFileInput && !btnShiftPlanUploadMaster.dataset.bound) {
+    btnShiftPlanUploadMaster.dataset.bound = "1";
     btnShiftPlanUploadMaster.addEventListener("click", () => {
       /**
        * Учительская подсказка: выбор файла запускаем через скрытый input,
        * чтобы интерфейс оставался «киосковым» и предсказуемым.
        */
+      if (btnShiftPlanUploadMaster.classList.contains("pill-btn--disabled")) {
+        showPackToast("Импорт доступен только мастеру или при разрешении в настройках.");
+        return;
+      }
       shiftPlanFileInput.click();
     });
-    shiftPlanFileInput.addEventListener("change", async () => {
-      const file = shiftPlanFileInput.files && shiftPlanFileInput.files[0];
-      if (file && typeof window.importShiftPlanFile === "function") {
-        await window.importShiftPlanFile(file);
-      }
-      shiftPlanFileInput.value = "";
-    });
+    if (!shiftPlanFileInput.dataset.bound) {
+      shiftPlanFileInput.dataset.bound = "1";
+      shiftPlanFileInput.addEventListener("change", async () => {
+        const file = shiftPlanFileInput.files && shiftPlanFileInput.files[0];
+        shiftPlanFileInput.value = "";
+        if (!file) return;
+        try {
+          await triggerShiftPlanImport(file);
+        } catch (error) {
+          showPackToast(`Ошибка импорта: ${error}`);
+        }
+      });
+    }
   }
   if (btnShiftPlanClearMaster) {
     btnShiftPlanClearMaster.addEventListener("click", async () => {
@@ -3695,7 +3935,7 @@ function mkModalBtn(text, kind, onClick) {
           return;
         }
         showPackToast("Сменный план очищен.");
-        await fetchShiftPlanFromBackend();
+        await fetchShiftPlanFromBackend({ force: true });
       } catch (error) {
         showPackToast("Ошибка сети: план не очищен.");
       }
@@ -3747,6 +3987,20 @@ function mkModalBtn(text, kind, onClick) {
       shiftPlanCatalogFilter = shiftPlanCatalogSearch.value || "";
       renderShiftPlanCatalog();
     });
+  }
+  if (shiftPlanCard) {
+    /**
+     * Учительская подсказка: любое действие внутри очереди
+     * временно блокирует автообновление, чтобы не сбивать скролл.
+     */
+    shiftPlanCard.addEventListener("pointerdown", markShiftPlanUserActive);
+    shiftPlanCard.addEventListener("keydown", markShiftPlanUserActive);
+    shiftPlanCard.addEventListener("input", markShiftPlanUserActive);
+    shiftPlanCard.addEventListener(
+      "wheel",
+      () => markShiftPlanUserActive(),
+      { passive: true }
+    );
   }
 
   /**
