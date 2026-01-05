@@ -59,6 +59,11 @@
   const skuName = document.getElementById("skuName");
   const skuIsActive = document.getElementById("skuIsActive");
   const skuPreviewValue = document.getElementById("skuPreviewValue");
+  const btnShiftPlanUploadMaster = document.getElementById("btnShiftPlanUploadMaster");
+  const btnShiftPlanImport = document.getElementById("btnShiftPlanImport");
+  const shiftPlanImportFile = document.getElementById("shiftPlanImportFile");
+  const shiftPlanFileInput = document.getElementById("shiftPlanFileInput");
+  const shiftPlanImportHint = document.getElementById("shiftPlanImportHint");
 
   // Отчёты: элементы управления и контейнер предпросмотра.
   const reportType = document.getElementById("reportType");
@@ -138,6 +143,35 @@
   // Учительская подсказка: делаем обновление кнопок доступным из index.html,
   // чтобы реакция на state была единой и не зависела от порядка загрузки.
   window.updateMasterActionButtons = updateMasterActionButtons;
+
+  function canImportShiftPlan() {
+    /**
+     * Учительская подсказка: импорт разрешён мастеру или оператору,
+     * если мастер включил соответствующую настройку.
+     */
+    if (uiMasterActive) return true;
+    return !!settingAllowShiftPlanImport?.checked;
+  }
+
+  function updateShiftPlanImportAvailability() {
+    /**
+     * Учительская подсказка: визуально показываем, можно ли импортировать план,
+     * чтобы оператор видел причину блокировки до клика.
+     */
+    const allowed = canImportShiftPlan();
+    if (btnShiftPlanImport) {
+      btnShiftPlanImport.classList.toggle("pill-btn--disabled", !allowed);
+    }
+    if (btnShiftPlanUploadMaster) {
+      btnShiftPlanUploadMaster.classList.toggle("pill-btn--disabled", !allowed);
+    }
+    if (shiftPlanImportHint) {
+      shiftPlanImportHint.style.display = allowed ? "none" : "block";
+      shiftPlanImportHint.textContent = allowed
+        ? ""
+        : "Импорт доступен только мастеру или при разрешении в настройках.";
+    }
+  }
 
   function normalizeSku(value) {
     /**
@@ -261,6 +295,7 @@
     }
     currentMasterId = masterId || null;
     uiMasterActive = !!currentMasterId;
+    updateShiftPlanImportAvailability();
     updateMasterActionButtons(uiMasterActive);
     document.body.classList.toggle("is-master-active", uiMasterActive);
     refreshMasterTimeout();
@@ -283,6 +318,7 @@
      */
     currentMasterId = masterId || null;
     uiMasterActive = !!currentMasterId;
+    updateShiftPlanImportAvailability();
     updateMasterActionButtons(uiMasterActive);
     document.body.classList.toggle("is-master-active", uiMasterActive);
     refreshMasterTimeout();
@@ -535,6 +571,7 @@
         allow_skip_sku: !!settings.operator_can_skip_sku,
       });
     }
+    updateShiftPlanImportAvailability();
   }
 
   async function fetchSettings() {
@@ -1319,6 +1356,58 @@
     btnMasterLogout.addEventListener("click", () => logoutMaster());
   }
 
+  if (btnShiftPlanUploadMaster) {
+    btnShiftPlanUploadMaster.addEventListener("click", () => {
+      /**
+       * Учительская подсказка: div не умеет выбирать файл,
+       * поэтому кликаем на скрытый input[type="file"].
+       */
+      if (!canImportShiftPlan()) {
+        window.showPackToast?.(
+          "Импорт доступен только мастеру или при разрешении в настройках."
+        );
+        return;
+      }
+      shiftPlanFileInput?.click();
+    });
+  }
+
+  if (btnShiftPlanImport) {
+    btnShiftPlanImport.addEventListener("click", () => {
+      /**
+       * Учительская подсказка: повторяем приём с input.click(),
+       * потому что именно input запускает системный выбор файла.
+       */
+      if (!canImportShiftPlan()) {
+        window.showPackToast?.(
+          "Импорт доступен только мастеру или при разрешении в настройках."
+        );
+        return;
+      }
+      shiftPlanImportFile?.click();
+    });
+  }
+
+  if (shiftPlanFileInput) {
+    shiftPlanFileInput.addEventListener("change", async () => {
+      const file = shiftPlanFileInput.files?.[0];
+      // Учительская подсказка: очищаем value, чтобы можно было выбрать тот же файл повторно.
+      shiftPlanFileInput.value = "";
+      if (!file) return;
+      await window.importShiftPlanFile?.(file);
+    });
+  }
+
+  if (shiftPlanImportFile) {
+    shiftPlanImportFile.addEventListener("change", async () => {
+      const file = shiftPlanImportFile.files?.[0];
+      // Учительская подсказка: очищаем value, чтобы можно было выбрать тот же файл повторно.
+      shiftPlanImportFile.value = "";
+      if (!file) return;
+      await window.importShiftPlanFile?.(file);
+    });
+  }
+
   if (masterLoginCancel) {
     masterLoginCancel.addEventListener("click", () => closeMasterModal());
   }
@@ -1363,6 +1452,13 @@
   }
   if (settingCanSkipSku) {
     settingCanSkipSku.addEventListener("change", () => saveSettings());
+  }
+  if (settingAllowShiftPlanImport) {
+    settingAllowShiftPlanImport.addEventListener("change", () => {
+      // Учительская подсказка: сразу обновляем доступность импорта в UI.
+      updateShiftPlanImportAvailability();
+      saveSettings();
+    });
   }
   if (btnSettingsSave) {
     btnSettingsSave.addEventListener("click", () => {
@@ -1423,6 +1519,7 @@
 
   // Стартовая синхронизация настроек.
   updateSettingsAvailability();
+  updateShiftPlanImportAvailability();
   renderTabs({ master_active: !!currentMasterId });
   fetchSettings();
   // Учительская подсказка: каталог для очереди загружаем всегда, не только в мастер-режиме.
