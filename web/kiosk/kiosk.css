@@ -533,7 +533,7 @@ body:not(.is-master-active) .screen--master {
 }
 
 .sku-catalog-grid {
-  /* Учительский комментарий: каталог — это витрина из 4 колонок. */
+  /* Учительский комментарий: каталог — это витрина из 4 колонок для моделей 001-004. */
   margin-top: var(--space-lg);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -547,16 +547,9 @@ body:not(.is-master-active) .screen--master {
   min-height: 0;
 }
 
-@media (max-width: 1600px) {
-  .sku-catalog-grid {
-    /* Учительский комментарий: при узком экране уменьшаем колонки до 3. */
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
 @media (max-width: 1200px) {
   .sku-catalog-grid {
-    /* Учительский комментарий: на 1200px переходим на 2 колонки. */
+    /* Учительский комментарий: на узком экране переходим на 2 колонки. */
     grid-template-columns: repeat(2, 1fr);
   }
 }
@@ -577,6 +570,8 @@ body:not(.is-master-active) .screen--master {
   border: var(--border-default);
   background: var(--surface-deep);
   min-width: 240px;
+  /* Учительский комментарий: разрешаем колонке растягиваться по высоте каталога. */
+  min-height: 0;
 }
 
 .sku-catalog-column-title {
@@ -590,6 +585,10 @@ body:not(.is-master-active) .screen--master {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+  /* Учительский комментарий: список скроллится внутри колонки, чтобы шапка всегда была видна. */
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .sku-catalog-row {
