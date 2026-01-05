@@ -1,21 +1,57 @@
 import re
 
 
-def normalize_sku(raw: str) -> str:
+def build_canonical_sku(
+    model_code: str,
+    width_cm: int | str,
+    fabric_code: str,
+    color_code: int | str,
+) -> str:
     """
-    Приводим SKU к каноническому виду:
-    MM.Кровать.NNN-NN.Ткань.XX
+    Собираем SKU в строгом каноническом формате.
+
+    Канон: MM.Кровать.NNN-NN.Ткань.XX
 
     Учительская подсказка:
-    - если строка уже каноническая — возвращаем как есть;
-    - если вместо точки перед тканью стоит дефис, заменяем его;
-    - если структура неизвестна — возвращаем исходную строку без падений.
+    - модель дополняем до 3 цифр;
+    - ширину приводим к "кодовой" форме (160 -> 16);
+    - цвет приводим к 2 цифрам.
+    """
+    model_raw = str(model_code or "").strip()
+    if model_raw.isdigit() and len(model_raw) <= 3:
+        model = model_raw.zfill(3)
+    else:
+        model = model_raw
+
+    width_raw = str(width_cm or "").strip()
+    if not width_raw:
+        width = ""
+    else:
+        width_value = int(width_raw)
+        if width_value >= 100 and width_value % 10 == 0:
+            width_value = width_value // 10
+        width = str(width_value)
+
+    fabric = str(fabric_code or "").strip()
+    color_raw = str(color_code or "").strip()
+    color = color_raw.zfill(2)[-2:]
+
+    return f"MM.Кровать.{model}-{width}.{fabric}.{color}"
+
+
+def normalize_canonical_sku(raw: str) -> str:
+    """
+    Приводим входной SKU к каноническому виду.
+
+    Учительская подсказка:
+    - если формат не распознаётся, выбрасываем ValueError;
+    - канон: MM.Кровать.NNN-NN.Ткань.XX
     """
     if raw is None:
-        return ""
+        raise ValueError("SKU пустой.")
     text = str(raw).strip()
     if not text:
-        return text
+        raise ValueError("SKU пустой после очистки.")
 
     canonical = re.compile(r"^MM\.Кровать\.\d{3}-\d{1,3}\.[A-Za-z0-9]+\.\d{2}$")
     if canonical.match(text):
@@ -27,8 +63,9 @@ def normalize_sku(raw: str) -> str:
         prefix, fabric, color = match.groups()
         return f"{prefix}.{fabric}.{color}"
 
-    # Учительская подсказка: если формат не распознан, не ломаем данные.
-    return text
+    raise ValueError(
+        "Неверный формат SKU. Ожидается MM.Кровать.001-16.VelutaLux.07"
+    )
 
 
 def parse_sku(value: str) -> dict | None:
@@ -38,7 +75,10 @@ def parse_sku(value: str) -> dict | None:
     Возвращаем:
     {model_num:int, size:int, fabric:str, color:int}
     """
-    text = normalize_sku(value)
+    try:
+        text = normalize_canonical_sku(value)
+    except ValueError:
+        return None
     match = re.match(
         r"^MM\.Кровать\.(\d{3})-(\d{1,3})\.([A-Za-z0-9]+)\.(\d{2})$",
         text,
@@ -72,3 +112,17 @@ def sku_sort_key(value: str) -> tuple:
         parsed["fabric"].lower(),
         parsed["color"],
     )
+
+
+def safe_normalize_sku(raw: str) -> str:
+    """
+    Безопасная нормализация SKU для read-only сценариев.
+
+    Учительская подсказка:
+    - в UI/поиске можно оставлять исходное значение,
+      если формат не распознан, чтобы не терять данные.
+    """
+    try:
+        return normalize_canonical_sku(raw)
+    except ValueError:
+        return str(raw or "").strip()

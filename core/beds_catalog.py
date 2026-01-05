@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from core.sku import normalize_sku
+from core.sku import safe_normalize_sku
 
 
 @dataclass
@@ -35,7 +35,7 @@ def _add(sku: str, model_code: str, width_code: str, color_code: str) -> None:
 
     # Учительская подсказка: ключи храним в каноническом формате,
     # чтобы UI, импорт и поиск не сталкивались с разными разделителями.
-    canonical = normalize_sku(sku)
+    canonical = safe_normalize_sku(sku)
     BEDS[canonical] = BedInfo(sku=canonical, title=title, details=details)
 
 
@@ -85,7 +85,7 @@ def get_bed_info(sku: str) -> Optional[BedInfo]:
     Вернуть информацию по кровати по её полному коду из 1С.
     Если такой записи нет в каталоге — вернуть None.
     """
-    # Учительская подсказка: нормализуем SKU, чтобы старый формат с дефисами
-    # не ломал поиск и не заставлял UI жить с разными разделителями.
-    normalized = normalize_sku(sku)
+    # Учительская подсказка: мягко нормализуем SKU, чтобы старый формат
+    # не ломал поиск, но и не падал при неожиданных строках.
+    normalized = safe_normalize_sku(sku)
     return BEDS.get(normalized) or BEDS.get(sku)

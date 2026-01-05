@@ -2,6 +2,7 @@ import time
 import json
 
 from core import storage
+from core.sku import normalize_canonical_sku
 
 STATE_STARTED = "started"
 STATE_BOX_CLOSED = "box_closed"
@@ -261,10 +262,14 @@ def start_session(sku: str) -> dict:
 
     now = time.time()
     plan = _build_plan(sku)
+    # Учительская подсказка: привязываем сессию к активной смене,
+    # чтобы прогресс сменного плана считался по правильному shift_id.
+    shift_id = storage.get_active_shift_id() or None
     session_id = storage.create_pack_session(
         sku=sku,
         ts=now,
         state=STATE_STARTED,
+        shift_id=shift_id,
         phase=PHASE_LAYOUT,
         current_step_index=0,
         total_steps=len(plan["layout"]),
@@ -312,6 +317,25 @@ def apply_event(event_type: str, sku: str | None = None) -> dict:
         state=next_state,
         end_time=end_time,
     )
+
+    # Учительская подсказка: если упаковка завершилась (TABLE_EMPTY),
+    # фиксируем прогресс по сменному плану как побочный учёт.
+    if next_state == STATE_TABLE_EMPTY:
+        shift_id = int(session["shift_id"] or 0)
+        if shift_id:
+            active_plan = storage.get_active_shift_plan(shift_id)
+            if active_plan:
+                try:
+                    canonical_sku = normalize_canonical_sku(sku or session["sku"])
+                except ValueError:
+                    canonical_sku = ""
+                if canonical_sku:
+                    storage.increment_shift_plan_progress(
+                        shift_id=shift_id,
+                        plan_id=int(active_plan["id"]),
+                        sku_code=canonical_sku,
+                        delta=1,
+                    )
 
     return {"session_id": int(session["id"]), "sku": session["sku"], "state": next_state}
 

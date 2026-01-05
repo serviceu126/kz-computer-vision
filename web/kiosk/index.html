@@ -2753,6 +2753,8 @@ document.getElementById("bedDetails").textContent =
         sku: item.sku_code,
         qty: item.qty,
         position: item.position,
+        done_qty: item.done_qty ?? 0,
+        remaining_qty: item.remaining_qty ?? 0,
       }));
       shiftPlanSelected = {
         id: plan.id,
@@ -2760,7 +2762,12 @@ document.getElementById("bedDetails").textContent =
         items: items.sort((a, b) => a.position - b.position),
       };
       shiftPlanSelectedSku = null;
-      renderShiftPlanPanelAuto({ force: options.force });
+      const nextSignature = buildShiftPlanSignature();
+      if (nextSignature === shiftPlanPanelSignature) {
+        updateShiftPlanProgress(shiftPlanSelected.items);
+      } else {
+        renderShiftPlanPanelAuto({ force: options.force });
+      }
       renderPackPlanPreview();
     } catch (error) {
       console.warn("Не удалось получить сменный план:", error);
@@ -2790,6 +2797,7 @@ document.getElementById("bedDetails").textContent =
     items.forEach((item) => {
       const row = document.createElement("div");
       row.className = "shift-plan-row";
+      row.dataset.sku = normalizeShiftPlanSku(item.sku);
       if (shiftPlanSelectedSku === item.sku) {
         row.classList.add("selected");
       }
@@ -2813,7 +2821,8 @@ document.getElementById("bedDetails").textContent =
       });
 
       const qtyEl = document.createElement("div");
-      qtyEl.textContent = `×${item.qty}`;
+      qtyEl.className = "shift-plan-qty";
+      qtyEl.textContent = buildShiftPlanQtyLabel(item);
 
       const minusBtn = document.createElement("div");
       minusBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
@@ -2876,6 +2885,42 @@ document.getElementById("bedDetails").textContent =
     });
 
     updateShiftPlanControlsAvailability();
+  }
+
+  function buildShiftPlanQtyLabel(item) {
+    /**
+     * Учительская подсказка: формируем короткую подпись для количества,
+     * чтобы оператор видел и план, и прогресс без отдельной верстки.
+     */
+    const qty = item?.qty ?? 0;
+    const remaining = item?.remaining_qty;
+    if (remaining === undefined || remaining === null) {
+      return `×${qty}`;
+    }
+    return `×${qty} • осталось ${remaining}`;
+  }
+
+  function updateShiftPlanProgress(items) {
+    /**
+     * Учительская подсказка: обновляем только числа прогресса,
+     * не пересоздавая весь список и не сбивая фокус/скролл.
+     */
+    const listEl = document.getElementById("shiftPlanList");
+    if (!listEl) return;
+    const map = new Map();
+    (items || []).forEach((item) => {
+      map.set(normalizeShiftPlanSku(item.sku), buildShiftPlanQtyLabel(item));
+    });
+    listEl.querySelectorAll(".shift-plan-row").forEach((row) => {
+      const sku = row.dataset.sku || "";
+      if (!map.has(sku)) return;
+      const qtyEl = row.querySelector(".shift-plan-qty");
+      if (!qtyEl) return;
+      const nextText = map.get(sku);
+      if (qtyEl.textContent !== nextText) {
+        qtyEl.textContent = nextText;
+      }
+    });
   }
 
   function applyOperatorSettings(settings) {

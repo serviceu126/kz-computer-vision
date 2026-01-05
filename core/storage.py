@@ -157,6 +157,20 @@ def init_db():
     )
     """)
 
+    # Таблица прогресса сменного плана.
+    # Она фиксирует, сколько SKU уже выполнено по каждой строке.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS shift_plan_progress (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shift_id INTEGER NOT NULL,
+        plan_id INTEGER NOT NULL,
+        sku_code TEXT NOT NULL,
+        done_qty INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL,
+        UNIQUE(shift_id, plan_id, sku_code)
+    )
+    """)
+
     # Таблица настроек киоска.
     # Храним простые флаги (0/1), чтобы быстро управлять правами оператора.
     cur.execute("""
@@ -1032,13 +1046,16 @@ def create_shift_plan_with_items(
     Создаёт новый сменный план и делает его активным.
 
     Объяснение по-учительски:
-    - сначала деактивируем старые планы, чтобы активным был только один;
+    - сначала деактивируем старые планы этой смены, чтобы активным был только один;
     - сохраняем и JSON-версию (для обратной совместимости), и таблицу items;
     - порядок строк фиксируем через position.
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE shift_plans SET is_active=0 WHERE is_active=1")
+    cur.execute(
+        "UPDATE shift_plans SET is_active=0 WHERE shift_id=? AND is_active=1",
+        [int(shift_id)],
+    )
 
     items_json = json.dumps(
         [{"sku_code": item["sku_code"], "qty": item["qty"]} for item in items],
@@ -1067,7 +1084,7 @@ def create_shift_plan_with_items(
     return plan_id
 
 
-def get_active_shift_plan() -> dict | None:
+def get_active_shift_plan(shift_id: int) -> dict | None:
     """
     Возвращает активный сменный план вместе с позициями.
 
@@ -1078,7 +1095,12 @@ def get_active_shift_plan() -> dict | None:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, name, created_at, shift_id FROM shift_plans WHERE is_active=1 ORDER BY created_at DESC LIMIT 1"
+        """SELECT id, name, created_at, shift_id
+           FROM shift_plans
+           WHERE is_active=1 AND shift_id=?
+           ORDER BY created_at DESC
+           LIMIT 1""",
+        [int(shift_id)],
     )
     plan_row = cur.fetchone()
     if not plan_row:
@@ -1103,19 +1125,25 @@ def get_active_shift_plan() -> dict | None:
     }
 
 
-def set_active_shift_plan(plan_id: int) -> None:
+def set_active_shift_plan(shift_id: int, plan_id: int) -> None:
     """
     Делает план активным и выключает остальные.
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE shift_plans SET is_active=0 WHERE is_active=1")
-    cur.execute("UPDATE shift_plans SET is_active=1 WHERE id=?", [int(plan_id)])
+    cur.execute(
+        "UPDATE shift_plans SET is_active=0 WHERE shift_id=? AND is_active=1",
+        [int(shift_id)],
+    )
+    cur.execute(
+        "UPDATE shift_plans SET is_active=1 WHERE id=? AND shift_id=?",
+        [int(plan_id), int(shift_id)],
+    )
     conn.commit()
     conn.close()
 
 
-def clear_active_shift_plan() -> None:
+def clear_active_shift_plan(shift_id: int) -> None:
     """
     Снимаем активность с текущего плана.
 
@@ -1124,7 +1152,59 @@ def clear_active_shift_plan() -> None:
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE shift_plans SET is_active=0 WHERE is_active=1")
+    cur.execute(
+        "UPDATE shift_plans SET is_active=0 WHERE shift_id=? AND is_active=1",
+        [int(shift_id)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_shift_plan_progress_map(shift_id: int, plan_id: int) -> dict[str, int]:
+    """
+    Возвращает словарь sku_code -> done_qty для плана.
+
+    Учительская подсказка:
+    - используем map для быстрого доступа при сборке ответа API.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT sku_code, done_qty
+           FROM shift_plan_progress
+           WHERE shift_id=? AND plan_id=?""",
+        [int(shift_id), int(plan_id)],
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return {row["sku_code"]: int(row["done_qty"] or 0) for row in rows}
+
+
+def increment_shift_plan_progress(
+    shift_id: int,
+    plan_id: int,
+    sku_code: str,
+    delta: int = 1,
+) -> None:
+    """
+    Увеличивает прогресс по SKU для сменного плана.
+
+    Учительская подсказка:
+    - используем UPSERT, чтобы не делать отдельные проверки существования;
+    - updated_at нужен для отладки и возможной аналитики.
+    """
+    if delta <= 0:
+        return
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO shift_plan_progress(shift_id, plan_id, sku_code, done_qty, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(shift_id, plan_id, sku_code)
+           DO UPDATE SET done_qty = done_qty + excluded.done_qty,
+                        updated_at = excluded.updated_at""",
+        [int(shift_id), int(plan_id), sku_code, int(delta), time.time()],
+    )
     conn.commit()
     conn.close()
 
