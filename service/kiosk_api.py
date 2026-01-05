@@ -36,9 +36,12 @@ from core.storage import (
     update_master_last_active,
     list_sku_catalog,
     create_sku_catalog_item,
+    get_sku_catalog_item_by_code,
     update_sku_catalog_item,
     update_sku_catalog_item_full,
+    update_sku_catalog_item_full_by_code,
     delete_sku_catalog_item,
+    delete_sku_catalog_item_by_code,
     get_report_rows,
     get_sku_catalog_validation_data,
     list_queue_items,
@@ -240,6 +243,17 @@ class SkuUpdateRequest(BaseModel):
     fabric_code: Optional[str] = None
     color_code: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class SkuCatalogUpsertRequest(BaseModel):
+    sku_code: str
+    model_code: str
+    width_cm: int
+    fabric_code: str
+    color_code: str
+    name: str
+    is_active: Optional[bool] = True
+    previous_sku_code: Optional[str] = None
 
 
 class ReportSaveRequest(BaseModel):
@@ -573,13 +587,44 @@ def build_canonical_sku(model_code: str, width_cm: int, fabric_code: str, color_
 
     Канон: MM.Кровать.NNN-NN.Модель.XX
     """
-    model = (model_code or "").strip()
-    # Учительская подсказка: размер берём как ввёл пользователь (например 16).
-    width = str(int(width_cm))
+    model = normalize_sku_model(model_code)
+    # Учительская подсказка: нормализуем ширину в один формат,
+    # чтобы SKU не превращался в 001-160 при вводе "160 см".
+    width = str(normalize_sku_width(width_cm))
     fabric = (fabric_code or "").strip()
     color_raw = str(color_code or "").strip()
     color = color_raw.zfill(2)[-2:]
     return f"MM.Кровать.{model}-{width}.{fabric}.{color}"
+
+
+def normalize_sku_width(width_cm: int | str) -> int:
+    """
+    Приводим ширину к коду для SKU.
+
+    Учительская ремарка:
+    - канон SKU ожидает 12/14/16, а не 120/140/160;
+    - если ширина похожа на сантиметры (>= 100 и кратна 10),
+      мы делим её на 10 и явно сохраняем как код.
+    """
+    try:
+        width_value = int(str(width_cm).strip())
+    except (TypeError, ValueError):
+        return 0
+    if width_value >= 100 and width_value % 10 == 0:
+        return width_value // 10
+    return width_value
+
+
+def normalize_sku_model(model_code: str) -> str:
+    """
+    Приводим модель к виду из трёх цифр.
+
+    Учительская ремарка:
+    - модель в каталоге должна совпадать с форматом SKU (001, 003, ...);
+    - если ввод состоит только из цифр и короче 3, дополняем нулями.
+    """
+    model_raw = (model_code or "").strip()
+    return model_raw.zfill(3) if model_raw.isdigit() and len(model_raw) <= 3 else model_raw
 
 def parse_shift_plan_csv(
     text: str,
@@ -1561,6 +1606,89 @@ async def sku_catalog_list():
     }
 
 
+@app.post("/api/kiosk/sku_catalog")
+async def sku_catalog_upsert(payload: SkuCatalogUpsertRequest):
+    """
+    Создаёт или обновляет SKU по его коду.
+
+    Учительская ремарка:
+    - редактировать каталог может только мастер;
+    - sku_code остаётся каноническим и единым для UI и БД.
+    """
+    ensure_master_mode()
+    normalized_width = normalize_sku_width(payload.width_cm)
+    if normalized_width <= 0:
+        raise HTTPException(status_code=400, detail="Ширина должна быть больше нуля.")
+    normalized_model = normalize_sku_model(payload.model_code)
+    sku_code = build_canonical_sku(
+        model_code=normalized_model,
+        width_cm=normalized_width,
+        fabric_code=payload.fabric_code,
+        color_code=payload.color_code,
+    )
+    payload_code = (payload.sku_code or "").strip()
+    if payload_code and payload_code != sku_code:
+        raise HTTPException(
+            status_code=400,
+            detail="SKU не совпадает с параметрами. Проверьте модель, ширину, ткань и цвет.",
+        )
+    sku_code, reason = validate_sku_format(sku_code)
+    if not sku_code:
+        raise HTTPException(
+            status_code=400,
+            detail=reason or "Неверный формат SKU. Ожидается MM.Кровать.001-16.VelutaLux.07.",
+        )
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Название SKU не должно быть пустым.")
+    previous_code = (payload.previous_sku_code or "").strip()
+    target_code = previous_code or sku_code
+    existing = get_sku_catalog_item_by_code(target_code) if target_code else None
+    if previous_code and previous_code != sku_code:
+        # Учительская ремарка: при смене sku_code убеждаемся, что новый код не занят.
+        if get_sku_catalog_item_by_code(sku_code):
+            raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.")
+    try:
+        if existing:
+            update_sku_catalog_item_full_by_code(
+                current_sku_code=target_code,
+                new_sku_code=sku_code,
+                name=name,
+                model_code=normalized_model,
+                width_cm=normalized_width,
+                fabric_code=payload.fabric_code.strip(),
+                color_code=payload.color_code.strip(),
+                is_active=1 if payload.is_active else 0,
+            )
+        else:
+            create_sku_catalog_item(
+                sku_code=sku_code,
+                name=name,
+                model_code=normalized_model,
+                width_cm=normalized_width,
+                fabric_code=payload.fabric_code.strip(),
+                color_code=payload.color_code.strip(),
+                is_active=1 if payload.is_active else 0,
+            )
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.") from exc
+    return {"ok": True, "sku": get_sku_catalog_item_by_code(sku_code)}
+
+
+@app.delete("/api/kiosk/sku_catalog/{sku_code}")
+async def sku_catalog_delete(sku_code: str):
+    """
+    Удаляет SKU по коду.
+
+    Учительская ремарка:
+    - удалять может только мастер;
+    - sku_code берём из URL, чтобы удаление было прозрачным.
+    """
+    ensure_master_mode()
+    delete_sku_catalog_item_by_code(sku_code)
+    return {"ok": True}
+
+
 @app.post("/api/kiosk/sku")
 async def sku_create(payload: SkuCreateRequest):
     """
@@ -1568,9 +1696,13 @@ async def sku_create(payload: SkuCreateRequest):
     """
     ensure_master_mode()
     # Учительская подсказка: строим SKU из полей и строго валидируем формат.
+    normalized_width = normalize_sku_width(payload.width_cm)
+    if normalized_width <= 0:
+        raise HTTPException(status_code=400, detail="Ширина должна быть больше нуля.")
+    normalized_model = normalize_sku_model(payload.model_code)
     draft_code = build_canonical_sku(
-        model_code=payload.model_code,
-        width_cm=payload.width_cm,
+        model_code=normalized_model,
+        width_cm=normalized_width,
         fabric_code=payload.fabric_code,
         color_code=payload.color_code,
     )
@@ -1587,8 +1719,8 @@ async def sku_create(payload: SkuCreateRequest):
         sku_id = create_sku_catalog_item(
             sku_code=sku_code,
             name=name,
-            model_code=payload.model_code.strip(),
-            width_cm=int(payload.width_cm),
+            model_code=normalized_model,
+            width_cm=normalized_width,
             fabric_code=payload.fabric_code.strip(),
             color_code=payload.color_code.strip(),
             is_active=1 if payload.is_active else 0,
@@ -1606,8 +1738,10 @@ async def sku_update(sku_id: int, payload: SkuUpdateRequest):
     ensure_master_mode()
     if payload.model_code is not None or payload.width_cm is not None or payload.fabric_code is not None:
         # Учительская подсказка: при полном редактировании пересобираем SKU и валидируем его.
-        model_code = (payload.model_code or "").strip()
-        width_cm = int(payload.width_cm or 0)
+        model_code = normalize_sku_model(payload.model_code or "")
+        width_cm = normalize_sku_width(payload.width_cm or 0)
+        if width_cm <= 0:
+            raise HTTPException(status_code=400, detail="Ширина должна быть больше нуля.")
         fabric_code = (payload.fabric_code or "").strip()
         color_code = (payload.color_code or "").strip()
         sku_code = build_canonical_sku(

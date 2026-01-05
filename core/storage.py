@@ -402,6 +402,27 @@ def list_sku_catalog(search: str | None = None, include_inactive: bool = False) 
     return [dict(row) for row in (rows or [])]
 
 
+def get_sku_catalog_item_by_code(sku_code: str) -> dict | None:
+    """
+    Возвращает SKU по коду.
+
+    Учительская ремарка:
+    - sku_code — наш бизнес-ключ, поэтому поиск идёт именно по нему.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, sku_code, name, model_code, width_cm, fabric_code, color_code,
+                  is_active, created_at, updated_at
+           FROM sku_catalog
+           WHERE sku_code=?""",
+        [sku_code],
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def create_sku_catalog_item(
     sku_code: str,
     name: str,
@@ -516,6 +537,46 @@ def update_sku_catalog_item_full(
     conn.close()
 
 
+def update_sku_catalog_item_full_by_code(
+    current_sku_code: str,
+    new_sku_code: str,
+    name: str,
+    model_code: str,
+    width_cm: int,
+    fabric_code: str,
+    color_code: str,
+    is_active: int,
+) -> None:
+    """
+    Полностью обновляет SKU по его коду.
+
+    Учительская ремарка:
+    - этот путь нужен для upsert-логики без зависимости от id;
+    - код меняется явно через переданный sku_code.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE sku_catalog
+           SET sku_code=?, name=?, model_code=?, width_cm=?, fabric_code=?,
+               color_code=?, is_active=?, updated_at=?
+           WHERE sku_code=?""",
+        [
+            new_sku_code,
+            name,
+            model_code,
+            int(width_cm),
+            fabric_code,
+            color_code,
+            int(is_active),
+            int(time.time()),
+            current_sku_code,
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
 def delete_sku_catalog_item(sku_id: int) -> None:
     """
     Удаляет SKU из каталога.
@@ -526,6 +587,20 @@ def delete_sku_catalog_item(sku_id: int) -> None:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("DELETE FROM sku_catalog WHERE id=?", [int(sku_id)])
+    conn.commit()
+    conn.close()
+
+
+def delete_sku_catalog_item_by_code(sku_code: str) -> None:
+    """
+    Удаляет SKU из каталога по коду.
+
+    Учительская ремарка:
+    - используем sku_code, потому что он виден оператору и уникален.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM sku_catalog WHERE sku_code=?", [sku_code])
     conn.commit()
     conn.close()
 
