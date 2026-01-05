@@ -1339,12 +1339,13 @@ async def shift_plan_import(file: UploadFile = File(...)):
         created_at=time.time(),
         items=items_for_storage,
     )
+    set_active_shift_plan(shift_id, plan_id)
 
     return {
         "plan_id": plan_id,
-        "plan_name": plan_name,
+        "shift_id": shift_id,
         "total_items": len(items_for_storage),
-        "normalized_items": normalized_items,
+        "activated": True,
     }
 
 
