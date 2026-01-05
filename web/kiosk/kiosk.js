@@ -16,6 +16,8 @@
   // UI-элементы мастера: кнопки, модалка, статус.
   const btnMasterLogin = document.getElementById("btnMasterLogin");
   const btnMasterLogout = document.getElementById("btnMasterLogout");
+  const masterButtonsContainer = btnMasterLogin?.parentElement || null;
+  const masterButtonsAnchor = document.getElementById("btnEndShift");
   const masterStatus = document.getElementById("masterStatus");
 
   const masterLoginBackdrop = document.getElementById("masterLoginBackdrop");
@@ -48,6 +50,7 @@
   const skuCatalogModalBackdrop = document.getElementById("skuCatalogModalBackdrop");
   const skuCatalogModalTitle = document.getElementById("skuCatalogModalTitle");
   const skuCatalogModalActions = document.getElementById("skuCatalogModalActions");
+  const skuCatalogModalError = document.getElementById("skuCatalogModalError");
   const skuCatalogModalCancel = document.getElementById("skuCatalogModalCancel");
   const skuModelCode = document.getElementById("skuModelCode");
   const skuWidthCm = document.getElementById("skuWidthCm");
@@ -79,7 +82,8 @@
   let masterTimeoutId = null;
   let skuModalOpen = false;
   let skuModalMode = "create";
-  let skuEditingId = null;
+  let skuEditingCode = null;
+  let skuCatalogSignature = "";
   // Учительская заметка: каталог SKU нужен всему UI, поэтому держим его в window.
   window.kzSkuCatalog = Array.isArray(window.kzSkuCatalog) ? window.kzSkuCatalog : [];
 
@@ -89,6 +93,109 @@
      * чтобы сравнение не ломалось из-за null/undefined.
      */
     return (value || "").toString().trim();
+  }
+
+  function insertAfter(parent, node, afterNode) {
+    /**
+     * Учительская подсказка: вставляем кнопку после опорного элемента,
+     * чтобы порядок "Добавить -> Завершить -> Мастер" оставался привычным.
+     */
+    if (!parent || !node) return;
+    if (!afterNode || afterNode.parentElement !== parent) {
+      parent.appendChild(node);
+      return;
+    }
+    parent.insertBefore(node, afterNode.nextSibling);
+  }
+
+  function updateMasterActionButtons(isMaster) {
+    /**
+     * Учительская подсказка: кнопка входа и выхода не должны жить одновременно.
+     *
+     * Правило:
+     * - мастер вошёл -> показываем только "Выйти (мастер)";
+     * - мастер не вошёл -> показываем только "Войти как мастер".
+     */
+    if (!masterButtonsContainer) return;
+    if (isMaster) {
+      if (btnMasterLogin && btnMasterLogin.isConnected) {
+        btnMasterLogin.remove();
+      }
+      if (btnMasterLogout && !btnMasterLogout.isConnected) {
+        btnMasterLogout.classList.remove("master-hidden");
+        insertAfter(masterButtonsContainer, btnMasterLogout, masterButtonsAnchor);
+      }
+    } else {
+      if (btnMasterLogout && btnMasterLogout.isConnected) {
+        btnMasterLogout.remove();
+      }
+      if (btnMasterLogin && !btnMasterLogin.isConnected) {
+        insertAfter(masterButtonsContainer, btnMasterLogin, masterButtonsAnchor);
+      }
+    }
+  }
+
+  // Учительская подсказка: делаем обновление кнопок доступным из index.html,
+  // чтобы реакция на state была единой и не зависела от порядка загрузки.
+  window.updateMasterActionButtons = updateMasterActionButtons;
+
+  function normalizeSku(value) {
+    /**
+     * Учительская подсказка: приводим SKU к каноническому виду.
+     *
+     * Канон: MM.Кровать.NNN-NN.Ткань.XX
+     * Если видим старый формат с дефисом перед тканью — меняем его на точку.
+     */
+    const text = normalizeSkuCode(value);
+    if (!text) return text;
+    const canonical = /^MM\.Кровать\.\d{3}-\d{1,3}\.[A-Za-z0-9]+\.\d{2}$/;
+    if (canonical.test(text)) return text;
+    const legacy = /^(MM\.Кровать\.\d{3}-\d{1,3})-([A-Za-z0-9]+)\.(\d{2})$/;
+    const match = text.match(legacy);
+    if (match) {
+      return `${match[1]}.${match[2]}.${match[3]}`;
+    }
+    return text;
+  }
+
+  function normalizeSkuModel(value) {
+    /**
+     * Учительская подсказка: модель храним в виде трёх цифр.
+     *
+     * Так мы сохраняем единый вид "001", чтобы SKU всегда совпадал с каталогом.
+     */
+    const raw = String(value || "").trim();
+    return /^\d{1,3}$/.test(raw) ? raw.padStart(3, "0") : raw;
+  }
+
+  function normalizeSkuWidth(value) {
+    /**
+     * Учительская подсказка: приводим ширину к каноническому виду.
+     *
+     * Почему так:
+     * - канон SKU использует размер "16", а в поле могут ввести "160";
+     * - если число похоже на сантиметры (>= 100 и кратно 10),
+     *   мы переводим его в размерный код, чтобы SKU был единым.
+     */
+    const raw = String(value || "").trim();
+    const widthValue = parseInt(raw || "0", 10);
+    if (!Number.isFinite(widthValue) || widthValue <= 0) {
+      return "";
+    }
+    if (widthValue >= 100 && widthValue % 10 === 0) {
+      return String(widthValue / 10);
+    }
+    return String(widthValue);
+  }
+
+  function setSkuModalError(message) {
+    /**
+     * Учительская подсказка: показываем ошибку прямо в модалке,
+     * чтобы оператор видел причину и не терял контекст.
+     */
+    if (!skuCatalogModalError) return;
+    skuCatalogModalError.textContent = message || "";
+    skuCatalogModalError.style.display = message ? "block" : "none";
   }
 
   window.findSku = (code) => {
@@ -149,14 +256,12 @@
     if (masterStatus) {
       masterStatus.textContent = masterId ? `Мастер: ${masterId}` : "Мастер: —";
     }
-    if (btnMasterLogout) {
-      btnMasterLogout.classList.toggle("master-hidden", !masterId);
-    }
     if (btnMasterLogoutSettings) {
       btnMasterLogoutSettings.classList.toggle("master-hidden", !masterId);
     }
     currentMasterId = masterId || null;
     uiMasterActive = !!currentMasterId;
+    updateMasterActionButtons(uiMasterActive);
     document.body.classList.toggle("is-master-active", uiMasterActive);
     refreshMasterTimeout();
   updateSettingsAvailability();
@@ -178,6 +283,7 @@
      */
     currentMasterId = masterId || null;
     uiMasterActive = !!currentMasterId;
+    updateMasterActionButtons(uiMasterActive);
     document.body.classList.toggle("is-master-active", uiMasterActive);
     refreshMasterTimeout();
     updateSettingsAvailability();
@@ -505,10 +611,9 @@
      * Это важно, чтобы каталог и очередь всегда использовали один вид SKU.
      */
     const modelRaw = (skuModelCode?.value || "").trim();
-    const model = /^\d{1,3}$/.test(modelRaw) ? modelRaw.padStart(3, "0") : modelRaw;
+    const model = normalizeSkuModel(modelRaw);
     const widthRaw = (skuWidthCm?.value || "").trim();
-    const widthValue = parseInt(widthRaw || "0", 10);
-    const width = Number.isFinite(widthValue) && widthValue > 0 ? String(widthValue) : "";
+    const width = normalizeSkuWidth(widthRaw);
     const fabric = (skuFabricCode?.value || "").trim();
     const colorRaw = (skuColorCode?.value || "").trim();
     const color = colorRaw ? colorRaw.padStart(2, "0").slice(-2) : "";
@@ -545,7 +650,8 @@
   function openSkuModal(mode, item = null) {
     skuModalOpen = true;
     skuModalMode = mode;
-    skuEditingId = item ? item.id : null;
+    skuEditingCode = item ? item.sku_code : null;
+    setSkuModalError("");
     if (skuCatalogModalBackdrop) {
       skuCatalogModalBackdrop.classList.add("open");
       skuCatalogModalBackdrop.setAttribute("aria-hidden", "false");
@@ -583,6 +689,7 @@
 
   function closeSkuModal() {
     skuModalOpen = false;
+    setSkuModalError("");
     if (skuCatalogModalBackdrop) {
       skuCatalogModalBackdrop.classList.remove("open");
       skuCatalogModalBackdrop.setAttribute("aria-hidden", "true");
@@ -795,54 +902,141 @@
 
   function parseSkuCanonical(sku) {
     /**
-     * Разбираем канонический SKU по правилам.
+     * Учительская подсказка: разбираем SKU только если в записи нет готовых полей.
      *
-     * Формат: MM.Кровать.NNN-NN.Модель.XX
+     * Формат: MM.Кровать.NNN-NN.Ткань.XX
      */
-    const text = String(sku || "").trim();
-    const match = text.match(/^MM\.Кровать\.(\d{3})-(\d{1,2})\.([A-Za-z0-9]+)\.(\d{2})$/);
+    const text = normalizeSku(sku);
+    const match = text.match(/^MM\.Кровать\.(\d{3})-(\d{1,3})\.([A-Za-z0-9]+)\.(\d{2})$/);
     if (!match) return null;
     return {
-      group: match[1],
+      modelCode: match[1],
+      modelNum: parseInt(match[1], 10),
+      sizeRaw: match[2],
       sizeNum: parseInt(match[2], 10),
-      model: match[3],
+      fabricCode: match[3],
+      colorRaw: match[4],
       colorNum: parseInt(match[4], 10),
     };
   }
 
-  function groupCatalogSkus(items) {
+  function getSkuMeta(item) {
     /**
-     * Группируем каталог по коду кровати (первые 3 цифры).
+     * Учительская подсказка: используем поля записи, а не строковый парсинг.
+     *
+     * Почему так:
+     * - backend уже хранит model/size/fabric/color отдельно;
+     * - парсим sku_code только как запасной вариант.
      */
-    const groups = new Map();
-    items.forEach((item) => {
-      const parsed = parseSkuCanonical(item.sku_code);
-      const groupKey = parsed ? parsed.group : "???";
-      if (!groups.has(groupKey)) {
-        groups.set(groupKey, []);
-      }
-      groups.get(groupKey).push({ item, parsed });
-    });
-    return groups;
+    const hasFields = item
+      && (item.model_code || item.width_cm || item.fabric_code || item.color_code);
+    if (hasFields) {
+      const sizeRaw = String(item.width_cm ?? "").trim();
+      const colorRaw = String(item.color_code ?? "").trim();
+      const modelRaw = String(item.model_code || "").trim();
+      return {
+        modelCode: modelRaw,
+        modelNum: parseInt(modelRaw || "0", 10) || 0,
+        sizeRaw,
+        sizeNum: parseInt(sizeRaw || "0", 10) || 0,
+        fabricCode: String(item.fabric_code || "").trim(),
+        colorRaw,
+        colorNum: parseInt(colorRaw || "0", 10) || 0,
+        normalizedSku: normalizeSku(item.sku_code || ""),
+      };
+    }
+    const parsed = parseSkuCanonical(item?.sku_code);
+    return parsed || {
+      modelCode: "???",
+      modelNum: 0,
+      sizeRaw: "",
+      sizeNum: 0,
+      fabricCode: "",
+      colorRaw: "",
+      colorNum: 0,
+      normalizedSku: normalizeSku(item?.sku_code || ""),
+    };
   }
 
-  function sortGroupItems(entries) {
+  function buildSkuSortKey(meta, item) {
     /**
-     * Сортировка по правилам:
-     * 1) размер (число после дефиса);
-     * 2) модель (строка);
-     * 3) цвет (число).
+     * Учительская подсказка: собираем ключ сортировки для SKU.
+     *
+     * Почему так:
+     * - сначала используем поля записи, если они есть;
+     * - если они пустые, пробуем распарсить sku_code;
+     * - если не удалось, отправляем строку в конец списка.
      */
-    return entries.sort((a, b) => {
-      if (!a.parsed || !b.parsed) return 0;
-      if (a.parsed.sizeNum !== b.parsed.sizeNum) {
-        return a.parsed.sizeNum - b.parsed.sizeNum;
-      }
-      if (a.parsed.model !== b.parsed.model) {
-        return a.parsed.model.localeCompare(b.parsed.model);
-      }
-      return a.parsed.colorNum - b.parsed.colorNum;
+    const normalizedSku = meta.normalizedSku || normalizeSku(item?.sku_code || "");
+    const parsedFallback = parseSkuCanonical(normalizedSku);
+    const modelNum = meta.modelNum || parsedFallback?.modelNum || 0;
+    const sizeNum = meta.sizeNum || parsedFallback?.sizeNum || 0;
+    const fabricCode = (meta.fabricCode || parsedFallback?.fabricCode || "").toLowerCase();
+    const colorNum = meta.colorNum || parsedFallback?.colorNum || 0;
+
+    if (!modelNum || !sizeNum || !fabricCode || !colorNum) {
+      return [9999, 9999, normalizedSku.toLowerCase(), 9999];
+    }
+    return [modelNum, sizeNum, fabricCode, colorNum, normalizedSku.toLowerCase()];
+  }
+
+  function buildSkuCatalogSignature(items) {
+    /**
+     * Учительская подсказка: собираем "подпись" каталога,
+     * чтобы не перерисовывать DOM без реальных изменений.
+     */
+    return JSON.stringify(
+      (items || []).map((item) => ({
+        sku: normalizeSku(item.sku_code || ""),
+        name: normalizeSkuCode(item.name || ""),
+        active: item.is_active ? 1 : 0,
+        model: normalizeSkuCode(item.model_code || ""),
+        width: item.width_cm ?? "",
+        fabric: normalizeSkuCode(item.fabric_code || ""),
+        color: normalizeSkuCode(item.color_code || ""),
+      }))
+    );
+  }
+
+  function groupSkuRows(rows) {
+    /**
+     * Учительская подсказка: распределяем по 4 колонкам стабильно,
+     * чтобы один и тот же SKU всегда попадал в одну и ту же колонку.
+     */
+    const baseGroups = {
+      "001": [],
+      "002": [],
+      "003": [],
+      "004": [],
+    };
+    (rows || []).forEach((item) => {
+      const meta = getSkuMeta(item);
+      const fallback = meta.modelNum ? null : parseSkuCanonical(meta.normalizedSku);
+      const modelNum = meta.modelNum || fallback?.modelNum || 0;
+      const bucket = modelNum > 0 ? ((modelNum - 1) % 4) + 1 : 4;
+      const key = String(bucket).padStart(3, "0");
+      baseGroups[key].push({ item, meta });
     });
+    return baseGroups;
+  }
+
+  function sortSku(a, b) {
+    /**
+     * Учительская подсказка: сортируем по правилам каталога.
+     *
+     * Порядок:
+     * 1) размер (число);
+     * 2) ткань (строка);
+     * 3) цвет (число);
+     * 4) sku_code как стабилизатор, чтобы порядок был стабильным.
+     */
+    const keyA = buildSkuSortKey(a.meta, a.item);
+    const keyB = buildSkuSortKey(b.meta, b.item);
+    for (let idx = 0; idx < keyA.length; idx += 1) {
+      if (keyA[idx] < keyB[idx]) return -1;
+      if (keyA[idx] > keyB[idx]) return 1;
+    }
+    return 0;
   }
 
   function renderSkuCatalogGrid(groups) {
@@ -850,7 +1044,8 @@
      * Рисуем витрину из 4 колонок с горизонтальным скроллом.
      */
     skuCatalogList.innerHTML = "";
-    if (!groups.size) {
+    const hasItems = Object.values(groups).some((items) => items.length);
+    if (!hasItems) {
       const empty = document.createElement("div");
       empty.className = "settings-hint";
       empty.textContent = "Пока нет SKU. Добавьте первую запись.";
@@ -858,30 +1053,31 @@
       return;
     }
 
-    const orderedKeys = Array.from(groups.keys()).sort();
+    const orderedKeys = ["001", "002", "003", "004"];
     orderedKeys.forEach((groupKey) => {
       const column = document.createElement("div");
       column.className = "sku-catalog-column";
 
       const title = document.createElement("div");
       title.className = "sku-catalog-column-title";
-      title.textContent = groupKey === "???" ? "Без группы" : `Кровать ${groupKey}`;
+      title.textContent = `КРОВАТЬ ${groupKey}`;
 
       const list = document.createElement("div");
       list.className = "sku-catalog-column-list";
 
-      const entries = sortGroupItems(groups.get(groupKey) || []);
-      entries.forEach(({ item }) => {
+      const entries = (groups[groupKey] || []).sort(sortSku);
+      entries.forEach(({ item, meta }) => {
         const row = document.createElement("div");
         row.className = "sku-catalog-row";
 
         const code = document.createElement("div");
         code.className = "sku-catalog-title";
-        code.textContent = item.sku_code || "—";
+        const normalizedSku = meta.normalizedSku || normalizeSku(item.sku_code || "");
+        code.textContent = normalizedSku || "—";
 
         const name = document.createElement("div");
         name.className = "sku-catalog-meta";
-        name.innerHTML = `<div>${item.name || "—"}</div><div>${item.model_code || ""} • ${item.width_cm || ""} см • ${item.fabric_code || ""} • ${item.color_code || ""}</div>`;
+        name.innerHTML = `<div>${item.name || "—"}</div><div>${meta.modelCode || ""} • ${meta.sizeRaw || ""} см • ${meta.fabricCode || ""} • ${meta.colorRaw || ""}</div>`;
 
         const status = document.createElement("div");
         status.className = "sku-catalog-meta";
@@ -920,16 +1116,19 @@
     /**
      * Учительская подсказка: удаление подтверждаем, чтобы избежать случайных потерь.
      */
-    if (!item || !item.id) return;
+    if (!item || !item.sku_code) return;
     const ok = window.confirm(`Удалить SKU ${item.sku_code}?`);
     if (!ok) return;
     try {
-      const resp = await fetch(`${API_SKU_URL}/${item.id}`, { method: "DELETE" });
+      const resp = await fetch(`${API_SKU_CATALOG_URL}/${encodeURIComponent(item.sku_code)}`, {
+        method: "DELETE",
+      });
       if (!resp.ok) {
         window.showPackToast?.("Не удалось удалить SKU.");
         return;
       }
       fetchSkuCatalog();
+      await window.loadSkuCatalog?.();
     } catch (error) {
       window.showPackToast?.("Ошибка сети: SKU не удалён.");
     }
@@ -937,83 +1136,67 @@
 
   function renderSkuCatalog(items) {
     if (!skuCatalogList) return;
-    const groups = groupCatalogSkus(items || []);
+    const signature = buildSkuCatalogSignature(items || []);
+    if (signature === skuCatalogSignature) return;
+    const scrollTop = skuCatalogList.scrollTop;
+    const scrollLeft = skuCatalogList.scrollLeft;
+    const groups = groupSkuRows(items || []);
     renderSkuCatalogGrid(groups);
+    skuCatalogSignature = signature;
+    skuCatalogList.scrollTop = scrollTop;
+    skuCatalogList.scrollLeft = scrollLeft;
   }
 
   async function saveSkuModal() {
     /**
      * Создаём или обновляем SKU.
      *
-     * В режиме редактирования меняем только имя и активность.
+     * В режиме редактирования используем предыдущий sku_code,
+     * чтобы явно обновить существующую запись.
      */
-    if (skuModalMode === "edit" && skuEditingId) {
-      const skuCode = buildSkuPreview();
-      if (!validateSkuCanonical(skuCode)) {
-        window.showPackToast?.("Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.");
-        return;
-      }
-      const payload = {
-        sku_code: skuCode,
-        name: (skuName?.value || "").trim(),
-        model_code: (skuModelCode?.value || "").trim(),
-        width_cm: parseInt(skuWidthCm?.value || "0", 10),
-        fabric_code: (skuFabricCode?.value || "").trim(),
-        color_code: (skuColorCode?.value || "").trim(),
-        is_active: !!skuIsActive?.checked,
-      };
-      try {
-        const resp = await fetch(`${API_SKU_URL}/${skuEditingId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          window.showPackToast?.(detail.detail || "Не удалось сохранить SKU.");
-          return;
-        }
-        closeSkuModal();
-        fetchSkuCatalog();
-      } catch (error) {
-        window.showPackToast?.("Ошибка сети: SKU не сохранён.");
-      }
-      return;
-    }
-
+    setSkuModalError("");
     const skuCode = buildSkuPreview();
+    const normalizedWidth = normalizeSkuWidth(skuWidthCm?.value || "");
     const payload = {
       sku_code: skuCode,
       name: (skuName?.value || "").trim(),
-      model_code: (skuModelCode?.value || "").trim(),
-      width_cm: parseInt(skuWidthCm?.value || "0", 10),
+      model_code: normalizeSkuModel(skuModelCode?.value || ""),
+      width_cm: normalizedWidth ? parseInt(normalizedWidth, 10) : 0,
       fabric_code: (skuFabricCode?.value || "").trim(),
       color_code: (skuColorCode?.value || "").trim(),
       is_active: !!skuIsActive?.checked,
     };
     if (!payload.sku_code || !payload.name) {
-      window.showPackToast?.("Заполните код SKU и название.");
+      setSkuModalError("Заполните код SKU и название.");
       return;
     }
     if (!validateSkuCanonical(payload.sku_code)) {
-      window.showPackToast?.("Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.");
+      setSkuModalError("Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.");
+      return;
+    }
+    if (!payload.width_cm) {
+      setSkuModalError("Укажите ширину, чтобы SKU был полным.");
       return;
     }
     try {
-      const resp = await fetch(API_SKU_URL, {
+      const body = skuModalMode === "edit" && skuEditingCode
+        ? { ...payload, previous_sku_code: skuEditingCode }
+        : payload;
+      const resp = await fetch(API_SKU_CATALOG_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body),
       });
-      if (!resp.ok) {
-        const detail = await resp.json().catch(() => ({}));
-        window.showPackToast?.(detail.detail || "Не удалось добавить SKU.");
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) {
+        setSkuModalError(data.detail || "Не удалось сохранить SKU.");
         return;
       }
       closeSkuModal();
       fetchSkuCatalog();
+      await window.loadSkuCatalog?.();
     } catch (error) {
-      window.showPackToast?.("Ошибка сети: SKU не добавлен.");
+      setSkuModalError("Ошибка сети: SKU не сохранён.");
     }
   }
 
