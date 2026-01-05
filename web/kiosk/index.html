@@ -2752,6 +2752,33 @@ document.getElementById("bedDetails").textContent =
   // Делаем обновление доступным снаружи (из kiosk.js).
   window.refreshShiftPlanFromBackend = fetchShiftPlanFromBackend;
 
+  window.applyImportedShiftPlanToLocal = async (data) => {
+    /**
+     * Учительская подсказка: применяем импорт только после успешного ответа,
+     * чтобы ручной список не перетирался фоновым polling.
+     */
+    const normalizedItems = Array.isArray(data?.normalized_items) ? data.normalized_items : [];
+    if (!normalizedItems.length) {
+      showPackToast("Импорт завершён, но список пуст.");
+      return;
+    }
+    const newPlan = {
+      id: Date.now(),
+      name: data?.plan_name || "Сменное задание",
+      items: normalizedItems.map((item) => ({
+        sku: item.sku_code,
+        qty: item.qty,
+      })),
+    };
+    shiftPlanList.unshift(newPlan);
+    shiftPlanSelected = newPlan;
+    shiftPlanSelectedSku = null;
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderShiftPlanList(shiftPlanSelected.items);
+    renderPackPlanPreview();
+  };
+
   function renderShiftPlanList(items) {
     /**
      * Рисуем текущий список SKU на смену.

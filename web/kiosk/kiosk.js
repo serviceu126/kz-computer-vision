@@ -482,10 +482,8 @@
       const importedCount = Number.isFinite(data.total_items) ? data.total_items : 0;
       window.showPackToast?.(`Импортировано ${importedCount} позиций`);
 
-      if (typeof window.refreshShiftPlanFromBackend === "function") {
-        await window.refreshShiftPlanFromBackend();
-      } else if (typeof window.syncQueueFromBackend === "function") {
-        await window.syncQueueFromBackend();
+      if (typeof window.applyImportedShiftPlanToLocal === "function") {
+        await window.applyImportedShiftPlanToLocal(data);
       }
     } catch (error) {
       window.showPackToast?.("Ошибка сети: файл не импортирован.");
