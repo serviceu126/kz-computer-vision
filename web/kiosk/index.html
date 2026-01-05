@@ -2942,6 +2942,42 @@ document.getElementById("bedDetails").textContent =
     });
   }
 
+  function buildShiftPlanQtyLabel(item) {
+    /**
+     * Учительская подсказка: формируем короткую подпись для количества,
+     * чтобы оператор видел и план, и прогресс без отдельной верстки.
+     */
+    const qty = item?.qty ?? 0;
+    const remaining = item?.remaining_qty;
+    if (remaining === undefined || remaining === null) {
+      return `×${qty}`;
+    }
+    return `×${qty} • осталось ${remaining}`;
+  }
+
+  function updateShiftPlanProgress(items) {
+    /**
+     * Учительская подсказка: обновляем только числа прогресса,
+     * не пересоздавая весь список и не сбивая фокус/скролл.
+     */
+    const listEl = document.getElementById("shiftPlanList");
+    if (!listEl) return;
+    const map = new Map();
+    (items || []).forEach((item) => {
+      map.set(normalizeShiftPlanSku(item.sku), buildShiftPlanQtyLabel(item));
+    });
+    listEl.querySelectorAll(".shift-plan-row").forEach((row) => {
+      const sku = row.dataset.sku || "";
+      if (!map.has(sku)) return;
+      const qtyEl = row.querySelector(".shift-plan-qty");
+      if (!qtyEl) return;
+      const nextText = map.get(sku);
+      if (qtyEl.textContent !== nextText) {
+        qtyEl.textContent = nextText;
+      }
+    });
+  }
+
   function applyOperatorSettings(settings) {
     /**
      * Применяем настройки прав оператора, полученные из backend.
