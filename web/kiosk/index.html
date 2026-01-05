@@ -976,6 +976,10 @@
       color: var(--text-muted);
     }
 
+    .settings-hint--danger {
+      color: var(--danger-text);
+    }
+
     .settings-row input[type="checkbox"] {
       width: var(--space-2xl);
       height: var(--space-2xl);
@@ -1907,6 +1911,7 @@
         </div>
       </div>
       <div class="modal-actions" id="skuCatalogModalActions"></div>
+      <div id="skuCatalogModalError" class="settings-hint settings-hint--danger" role="alert"></div>
       <div class="modal-actions modal-actions--footer">
         <div id="skuCatalogModalCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
           <span class="dot"></span>
@@ -1952,6 +1957,9 @@
   let shiftPlanSelectedSku = null;
   let manualModeEnabled = false;
   let shiftPlanCatalogFilter = "";
+  let shiftPlanUserActive = false;
+  let shiftPlanUserActiveTimer = null;
+  let shiftPlanPanelSignature = "";
 
   // Настройки прав оператора приходят из backend.
   // Здесь держим их как единый объект, чтобы функции могли опираться на них.
@@ -1973,6 +1981,133 @@
     renderShiftPlanList(shiftPlanSelected ? shiftPlanSelected.items : []);
     renderPackPlanPreview();
   };
+
+  function saveScrollPositions() {
+    /**
+     * Учительская подсказка: сохраняем скролл контейнеров очереди,
+     * чтобы автообновление не "прыгало" при перерисовке DOM.
+     */
+    const targets = [
+      document.getElementById("shiftPlanList"),
+      document.getElementById("shiftPlanCatalogList"),
+      document.getElementById("shiftPlanCard"),
+    ].filter(Boolean);
+    const map = {};
+    targets.forEach((el) => {
+      if (!el.id) return;
+      map[el.id] = { top: el.scrollTop, left: el.scrollLeft };
+    });
+    return map;
+  }
+
+  function restoreScrollPositions(map) {
+    /**
+     * Учительская подсказка: возвращаем скролл ровно туда,
+     * где оператор остановился, чтобы UI не сбивал работу.
+     */
+    if (!map) return;
+    Object.keys(map).forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.scrollTop = map[id].top || 0;
+      el.scrollLeft = map[id].left || 0;
+    });
+  }
+
+  function getActiveElementInfo() {
+    /**
+     * Учительская подсказка: сохраняем фокус, если оператор вводит данные.
+     * Это предотвращает потерю курсора при автоперерисовке.
+     */
+    const active = document.activeElement;
+    const shiftPlanCard = document.getElementById("shiftPlanCard");
+    if (!active || !active.id || !shiftPlanCard || !shiftPlanCard.contains(active)) {
+      return null;
+    }
+    const info = { id: active.id };
+    if ("selectionStart" in active && "selectionEnd" in active) {
+      info.selectionStart = active.selectionStart;
+      info.selectionEnd = active.selectionEnd;
+    }
+    return info;
+  }
+
+  function restoreActiveElement(info) {
+    /**
+     * Учительская подсказка: возвращаем фокус и позицию курсора,
+     * чтобы оператор продолжил ввод без "скачков".
+     */
+    if (!info || !info.id) return;
+    const el = document.getElementById(info.id);
+    if (!el) return;
+    el.focus();
+    if ("selectionStart" in el && info.selectionStart !== undefined) {
+      el.selectionStart = info.selectionStart;
+      el.selectionEnd = info.selectionEnd;
+    }
+  }
+
+  function isShiftPlanTabActive() {
+    /**
+     * Учительская подсказка: проверяем, что вкладка "Очередь" активна,
+     * иначе не блокируем обновление интерфейса.
+     */
+    const tab = document.getElementById("tab-queue");
+    return tab && tab.getAttribute("data-active") === "true";
+  }
+
+  function markShiftPlanUserActive() {
+    /**
+     * Учительская подсказка: фиксируем активность пользователя
+     * и сбрасываем её через короткую паузу без действий.
+     */
+    shiftPlanUserActive = true;
+    if (shiftPlanUserActiveTimer) {
+      clearTimeout(shiftPlanUserActiveTimer);
+    }
+    shiftPlanUserActiveTimer = setTimeout(() => {
+      shiftPlanUserActive = false;
+    }, 1500);
+  }
+
+  function buildShiftPlanSignature() {
+    /**
+     * Учительская подсказка: собираем сигнатуру данных очереди,
+     * чтобы лишний раз не трогать DOM без реальных изменений.
+     */
+    const items = shiftPlanSelected?.items || [];
+    return JSON.stringify({
+      selectedId: shiftPlanSelected?.id || 0,
+      selectedName: shiftPlanSelected?.name || "",
+      selectedSku: shiftPlanSelectedSku || "",
+      items: items.map((item) => [item.sku, item.qty]),
+      permissions: {
+        reorder: operatorSettings.allow_reorder_queue,
+        qty: operatorSettings.allow_change_qty,
+        remove: operatorSettings.allow_remove_sku,
+        add: operatorSettings.allow_add_from_catalog,
+        manual: operatorSettings.allow_manual_mode,
+        skip: operatorSettings.allow_skip_sku,
+      },
+    });
+  }
+
+  function renderShiftPlanPanelAuto(options = {}) {
+    /**
+     * Учительская подсказка: автообновление очереди не должно
+     * сбивать прокрутку и фокус при активной работе пользователя.
+     */
+    const shouldDefer = isShiftPlanTabActive() && shiftPlanUserActive && !options.force;
+    if (shouldDefer) return;
+    const signature = buildShiftPlanSignature();
+    if (!options.force && signature === shiftPlanPanelSignature) return;
+    const scrollMap = saveScrollPositions();
+    const activeInfo = getActiveElementInfo();
+    renderShiftPlanPanel();
+    shiftPlanPanelSignature = signature;
+    restoreScrollPositions(scrollMap);
+    restoreActiveElement(activeInfo);
+  }
   let btnPackStart = null;
   let btnPackStepComplete = null;
   let btnPackPhaseNext = null;
@@ -2286,6 +2421,9 @@ document.getElementById("bedDetails").textContent =
       if (!resp.ok) return;
       const data = await resp.json();
       data.client_timestamp = Date.now() / 1000;
+      // Учительская подсказка: перед обновлением UI бережно
+      // обновляем очередь, если это не мешает оператору.
+      renderShiftPlanPanelAuto();
       renderState(data);
     } catch (e) {
       console.warn("Ошибка получения состояния киоска:", e);
@@ -2357,7 +2495,7 @@ document.getElementById("bedDetails").textContent =
       shiftPlanList = [];
       shiftPlanSelected = null;
     }
-    renderShiftPlanPanel();
+    renderShiftPlanPanelAuto();
     renderPackPlanPreview();
   }
 
@@ -2525,6 +2663,9 @@ document.getElementById("bedDetails").textContent =
     }
     renderShiftPlanList(shiftPlanSelected.items);
     updateShiftPlanControlsAvailability();
+    // Учительская подсказка: фиксируем актуальную сигнатуру,
+    // чтобы автообновление не дублировало рендер без изменений.
+    shiftPlanPanelSignature = buildShiftPlanSignature();
   }
 
   function formatShiftPlanTimestamp(value) {
@@ -2574,7 +2715,7 @@ document.getElementById("bedDetails").textContent =
     }
   }
 
-  async function fetchShiftPlanFromBackend() {
+  async function fetchShiftPlanFromBackend(options = {}) {
     /**
      * Учительская подсказка: подгружаем активный план из базы,
      * чтобы оператор видел актуальный список даже без редактирования.
@@ -2589,7 +2730,7 @@ document.getElementById("bedDetails").textContent =
       if (!plan) {
         shiftPlanSelected = null;
         shiftPlanSelectedSku = null;
-        renderShiftPlanPanel();
+        renderShiftPlanPanelAuto({ force: options.force });
         renderPackPlanPreview();
         return;
       }
@@ -2605,7 +2746,7 @@ document.getElementById("bedDetails").textContent =
         items: items.sort((a, b) => a.position - b.position),
       };
       shiftPlanSelectedSku = null;
-      renderShiftPlanPanel();
+      renderShiftPlanPanelAuto({ force: options.force });
       renderPackPlanPreview();
     } catch (error) {
       console.warn("Не удалось получить сменный план:", error);
@@ -3546,6 +3687,7 @@ function mkModalBtn(text, kind, onClick) {
   const shiftPlanRenameInput = document.getElementById("shiftPlanRenameInput");
   const btnShiftPlanRename = document.getElementById("btnShiftPlanRename");
   const shiftPlanCatalogSearch = document.getElementById("shiftPlanCatalogSearch");
+  const shiftPlanCard = document.getElementById("shiftPlanCard");
 
   if (btnPackStart) {
     btnPackStart.addEventListener("click", () => {
@@ -3592,7 +3734,7 @@ function mkModalBtn(text, kind, onClick) {
      * новый список SKU, уже сохранённый в базе.
      */
     try {
-      await fetchShiftPlanFromBackend();
+      await fetchShiftPlanFromBackend({ force: true });
       return true;
     } catch (error) {
       return false;
@@ -3695,7 +3837,7 @@ function mkModalBtn(text, kind, onClick) {
           return;
         }
         showPackToast("Сменный план очищен.");
-        await fetchShiftPlanFromBackend();
+        await fetchShiftPlanFromBackend({ force: true });
       } catch (error) {
         showPackToast("Ошибка сети: план не очищен.");
       }
@@ -3747,6 +3889,20 @@ function mkModalBtn(text, kind, onClick) {
       shiftPlanCatalogFilter = shiftPlanCatalogSearch.value || "";
       renderShiftPlanCatalog();
     });
+  }
+  if (shiftPlanCard) {
+    /**
+     * Учительская подсказка: любое действие внутри очереди
+     * временно блокирует автообновление, чтобы не сбивать скролл.
+     */
+    shiftPlanCard.addEventListener("pointerdown", markShiftPlanUserActive);
+    shiftPlanCard.addEventListener("keydown", markShiftPlanUserActive);
+    shiftPlanCard.addEventListener("input", markShiftPlanUserActive);
+    shiftPlanCard.addEventListener(
+      "wheel",
+      () => markShiftPlanUserActive(),
+      { passive: true }
+    );
   }
 
   /**
