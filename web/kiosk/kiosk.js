@@ -81,6 +81,7 @@
   let skuModalOpen = false;
   let skuModalMode = "create";
   let skuEditingCode = null;
+  let skuCatalogSignature = "";
   // Учительская заметка: каталог SKU нужен всему UI, поэтому держим его в window.
   window.kzSkuCatalog = Array.isArray(window.kzSkuCatalog) ? window.kzSkuCatalog : [];
 
@@ -90,6 +91,25 @@
      * чтобы сравнение не ломалось из-за null/undefined.
      */
     return (value || "").toString().trim();
+  }
+
+  function normalizeSku(value) {
+    /**
+     * Учительская подсказка: приводим SKU к каноническому виду.
+     *
+     * Канон: MM.Кровать.NNN-NN.Ткань.XX
+     * Если видим старый формат с дефисом перед тканью — меняем его на точку.
+     */
+    const text = normalizeSkuCode(value);
+    if (!text) return text;
+    const canonical = /^MM\.Кровать\.\d{3}-\d{1,3}\.[A-Za-z0-9]+\.\d{2}$/;
+    if (canonical.test(text)) return text;
+    const legacy = /^(MM\.Кровать\.\d{3}-\d{1,3})-([A-Za-z0-9]+)\.(\d{2})$/;
+    const match = text.match(legacy);
+    if (match) {
+      return `${match[1]}.${match[2]}.${match[3]}`;
+    }
+    return text;
   }
 
   function normalizeSkuModel(value) {
@@ -841,11 +861,12 @@
      *
      * Формат: MM.Кровать.NNN-NN.Ткань.XX
      */
-    const text = String(sku || "").trim();
+    const text = normalizeSku(sku);
     const match = text.match(/^MM\.Кровать\.(\d{3})-(\d{1,3})\.([A-Za-z0-9]+)\.(\d{2})$/);
     if (!match) return null;
     return {
       modelCode: match[1],
+      modelNum: parseInt(match[1], 10),
       sizeRaw: match[2],
       sizeNum: parseInt(match[2], 10),
       fabricCode: match[3],
@@ -867,41 +888,88 @@
     if (hasFields) {
       const sizeRaw = String(item.width_cm ?? "").trim();
       const colorRaw = String(item.color_code ?? "").trim();
+      const modelRaw = String(item.model_code || "").trim();
       return {
-        modelCode: String(item.model_code || "").trim(),
+        modelCode: modelRaw,
+        modelNum: parseInt(modelRaw || "0", 10) || 0,
         sizeRaw,
         sizeNum: parseInt(sizeRaw || "0", 10) || 0,
         fabricCode: String(item.fabric_code || "").trim(),
         colorRaw,
         colorNum: parseInt(colorRaw || "0", 10) || 0,
+        normalizedSku: normalizeSku(item.sku_code || ""),
       };
     }
     const parsed = parseSkuCanonical(item?.sku_code);
     return parsed || {
       modelCode: "???",
+      modelNum: 0,
       sizeRaw: "",
       sizeNum: 0,
       fabricCode: "",
       colorRaw: "",
       colorNum: 0,
+      normalizedSku: normalizeSku(item?.sku_code || ""),
     };
+  }
+
+  function buildSkuSortKey(meta, item) {
+    /**
+     * Учительская подсказка: собираем ключ сортировки для SKU.
+     *
+     * Почему так:
+     * - сначала используем поля записи, если они есть;
+     * - если они пустые, пробуем распарсить sku_code;
+     * - если не удалось, отправляем строку в конец списка.
+     */
+    const normalizedSku = meta.normalizedSku || normalizeSku(item?.sku_code || "");
+    const parsedFallback = parseSkuCanonical(normalizedSku);
+    const modelNum = meta.modelNum || parsedFallback?.modelNum || 0;
+    const sizeNum = meta.sizeNum || parsedFallback?.sizeNum || 0;
+    const fabricCode = (meta.fabricCode || parsedFallback?.fabricCode || "").toLowerCase();
+    const colorNum = meta.colorNum || parsedFallback?.colorNum || 0;
+
+    if (!modelNum || !sizeNum || !fabricCode || !colorNum) {
+      return [9999, 9999, normalizedSku.toLowerCase(), 9999];
+    }
+    return [modelNum, sizeNum, fabricCode, colorNum, normalizedSku.toLowerCase()];
+  }
+
+  function buildSkuCatalogSignature(items) {
+    /**
+     * Учительская подсказка: собираем "подпись" каталога,
+     * чтобы не перерисовывать DOM без реальных изменений.
+     */
+    return JSON.stringify(
+      (items || []).map((item) => ({
+        sku: normalizeSku(item.sku_code || ""),
+        name: normalizeSkuCode(item.name || ""),
+        active: item.is_active ? 1 : 0,
+        model: normalizeSkuCode(item.model_code || ""),
+        width: item.width_cm ?? "",
+        fabric: normalizeSkuCode(item.fabric_code || ""),
+        color: normalizeSkuCode(item.color_code || ""),
+      }))
+    );
   }
 
   function groupSkuRows(rows) {
     /**
-     * Учительская подсказка: группируем строго по моделям 001-004,
-     * остальное складываем в отдельную колонку "ДРУГОЕ".
+     * Учительская подсказка: распределяем по 4 колонкам стабильно,
+     * чтобы один и тот же SKU всегда попадал в одну и ту же колонку.
      */
     const baseGroups = {
       "001": [],
       "002": [],
       "003": [],
       "004": [],
-      other: [],
     };
     (rows || []).forEach((item) => {
       const meta = getSkuMeta(item);
-      const key = meta.modelCode && baseGroups[meta.modelCode] ? meta.modelCode : "other";
+      const fallback = meta.modelNum ? null : parseSkuCanonical(meta.normalizedSku);
+      const modelNum = meta.modelNum || fallback?.modelNum || 0;
+      const bucket = modelNum > 0 ? ((modelNum - 1) % 4) + 1 : 4;
+      const key = String(bucket).padStart(3, "0");
       baseGroups[key].push({ item, meta });
     });
     return baseGroups;
@@ -917,18 +985,13 @@
      * 3) цвет (число);
      * 4) sku_code как стабилизатор, чтобы порядок был стабильным.
      */
-    if (a.meta.sizeNum !== b.meta.sizeNum) {
-      return a.meta.sizeNum - b.meta.sizeNum;
+    const keyA = buildSkuSortKey(a.meta, a.item);
+    const keyB = buildSkuSortKey(b.meta, b.item);
+    for (let idx = 0; idx < keyA.length; idx += 1) {
+      if (keyA[idx] < keyB[idx]) return -1;
+      if (keyA[idx] > keyB[idx]) return 1;
     }
-    const fabricA = (a.meta.fabricCode || "").toLowerCase();
-    const fabricB = (b.meta.fabricCode || "").toLowerCase();
-    if (fabricA !== fabricB) {
-      return fabricA.localeCompare(fabricB);
-    }
-    if (a.meta.colorNum !== b.meta.colorNum) {
-      return a.meta.colorNum - b.meta.colorNum;
-    }
-    return String(a.item.sku_code || "").localeCompare(String(b.item.sku_code || ""));
+    return 0;
   }
 
   function renderSkuCatalogGrid(groups) {
@@ -945,14 +1008,14 @@
       return;
     }
 
-    const orderedKeys = ["001", "002", "003", "004", "other"];
+    const orderedKeys = ["001", "002", "003", "004"];
     orderedKeys.forEach((groupKey) => {
       const column = document.createElement("div");
       column.className = "sku-catalog-column";
 
       const title = document.createElement("div");
       title.className = "sku-catalog-column-title";
-      title.textContent = groupKey === "other" ? "ДРУГОЕ" : `КРОВАТЬ ${groupKey}`;
+      title.textContent = `КРОВАТЬ ${groupKey}`;
 
       const list = document.createElement("div");
       list.className = "sku-catalog-column-list";
@@ -964,7 +1027,8 @@
 
         const code = document.createElement("div");
         code.className = "sku-catalog-title";
-        code.textContent = item.sku_code || "—";
+        const normalizedSku = meta.normalizedSku || normalizeSku(item.sku_code || "");
+        code.textContent = normalizedSku || "—";
 
         const name = document.createElement("div");
         name.className = "sku-catalog-meta";
@@ -1027,8 +1091,15 @@
 
   function renderSkuCatalog(items) {
     if (!skuCatalogList) return;
+    const signature = buildSkuCatalogSignature(items || []);
+    if (signature === skuCatalogSignature) return;
+    const scrollTop = skuCatalogList.scrollTop;
+    const scrollLeft = skuCatalogList.scrollLeft;
     const groups = groupSkuRows(items || []);
     renderSkuCatalogGrid(groups);
+    skuCatalogSignature = signature;
+    skuCatalogList.scrollTop = scrollTop;
+    skuCatalogList.scrollLeft = scrollLeft;
   }
 
   async function saveSkuModal() {
