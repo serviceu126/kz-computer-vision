@@ -837,54 +837,98 @@
 
   function parseSkuCanonical(sku) {
     /**
-     * Разбираем канонический SKU по правилам.
+     * Учительская подсказка: разбираем SKU только если в записи нет готовых полей.
      *
-     * Формат: MM.Кровать.NNN-NN.Модель.XX
+     * Формат: MM.Кровать.NNN-NN.Ткань.XX
      */
     const text = String(sku || "").trim();
-    const match = text.match(/^MM\.Кровать\.(\d{3})-(\d{1,2})\.([A-Za-z0-9]+)\.(\d{2})$/);
+    const match = text.match(/^MM\.Кровать\.(\d{3})-(\d{1,3})\.([A-Za-z0-9]+)\.(\d{2})$/);
     if (!match) return null;
     return {
-      group: match[1],
+      modelCode: match[1],
+      sizeRaw: match[2],
       sizeNum: parseInt(match[2], 10),
-      model: match[3],
+      fabricCode: match[3],
+      colorRaw: match[4],
       colorNum: parseInt(match[4], 10),
     };
   }
 
-  function groupCatalogSkus(items) {
+  function getSkuMeta(item) {
     /**
-     * Группируем каталог по коду кровати (первые 3 цифры).
+     * Учительская подсказка: используем поля записи, а не строковый парсинг.
+     *
+     * Почему так:
+     * - backend уже хранит model/size/fabric/color отдельно;
+     * - парсим sku_code только как запасной вариант.
      */
-    const groups = new Map();
-    items.forEach((item) => {
-      const parsed = parseSkuCanonical(item.sku_code);
-      const groupKey = parsed ? parsed.group : "???";
-      if (!groups.has(groupKey)) {
-        groups.set(groupKey, []);
-      }
-      groups.get(groupKey).push({ item, parsed });
-    });
-    return groups;
+    const hasFields = item
+      && (item.model_code || item.width_cm || item.fabric_code || item.color_code);
+    if (hasFields) {
+      const sizeRaw = String(item.width_cm ?? "").trim();
+      const colorRaw = String(item.color_code ?? "").trim();
+      return {
+        modelCode: String(item.model_code || "").trim(),
+        sizeRaw,
+        sizeNum: parseInt(sizeRaw || "0", 10) || 0,
+        fabricCode: String(item.fabric_code || "").trim(),
+        colorRaw,
+        colorNum: parseInt(colorRaw || "0", 10) || 0,
+      };
+    }
+    const parsed = parseSkuCanonical(item?.sku_code);
+    return parsed || {
+      modelCode: "???",
+      sizeRaw: "",
+      sizeNum: 0,
+      fabricCode: "",
+      colorRaw: "",
+      colorNum: 0,
+    };
   }
 
-  function sortGroupItems(entries) {
+  function groupSkuRows(rows) {
     /**
-     * Сортировка по правилам:
-     * 1) размер (число после дефиса);
-     * 2) модель (строка);
-     * 3) цвет (число).
+     * Учительская подсказка: группируем строго по моделям 001-004,
+     * остальное складываем в отдельную колонку "ДРУГОЕ".
      */
-    return entries.sort((a, b) => {
-      if (!a.parsed || !b.parsed) return 0;
-      if (a.parsed.sizeNum !== b.parsed.sizeNum) {
-        return a.parsed.sizeNum - b.parsed.sizeNum;
-      }
-      if (a.parsed.model !== b.parsed.model) {
-        return a.parsed.model.localeCompare(b.parsed.model);
-      }
-      return a.parsed.colorNum - b.parsed.colorNum;
+    const baseGroups = {
+      "001": [],
+      "002": [],
+      "003": [],
+      "004": [],
+      other: [],
+    };
+    (rows || []).forEach((item) => {
+      const meta = getSkuMeta(item);
+      const key = meta.modelCode && baseGroups[meta.modelCode] ? meta.modelCode : "other";
+      baseGroups[key].push({ item, meta });
     });
+    return baseGroups;
+  }
+
+  function sortSku(a, b) {
+    /**
+     * Учительская подсказка: сортируем по правилам каталога.
+     *
+     * Порядок:
+     * 1) размер (число);
+     * 2) ткань (строка);
+     * 3) цвет (число);
+     * 4) sku_code как стабилизатор, чтобы порядок был стабильным.
+     */
+    if (a.meta.sizeNum !== b.meta.sizeNum) {
+      return a.meta.sizeNum - b.meta.sizeNum;
+    }
+    const fabricA = (a.meta.fabricCode || "").toLowerCase();
+    const fabricB = (b.meta.fabricCode || "").toLowerCase();
+    if (fabricA !== fabricB) {
+      return fabricA.localeCompare(fabricB);
+    }
+    if (a.meta.colorNum !== b.meta.colorNum) {
+      return a.meta.colorNum - b.meta.colorNum;
+    }
+    return String(a.item.sku_code || "").localeCompare(String(b.item.sku_code || ""));
   }
 
   function renderSkuCatalogGrid(groups) {
@@ -892,7 +936,8 @@
      * Рисуем витрину из 4 колонок с горизонтальным скроллом.
      */
     skuCatalogList.innerHTML = "";
-    if (!groups.size) {
+    const hasItems = Object.values(groups).some((items) => items.length);
+    if (!hasItems) {
       const empty = document.createElement("div");
       empty.className = "settings-hint";
       empty.textContent = "Пока нет SKU. Добавьте первую запись.";
@@ -900,20 +945,20 @@
       return;
     }
 
-    const orderedKeys = Array.from(groups.keys()).sort();
+    const orderedKeys = ["001", "002", "003", "004", "other"];
     orderedKeys.forEach((groupKey) => {
       const column = document.createElement("div");
       column.className = "sku-catalog-column";
 
       const title = document.createElement("div");
       title.className = "sku-catalog-column-title";
-      title.textContent = groupKey === "???" ? "Без группы" : `Кровать ${groupKey}`;
+      title.textContent = groupKey === "other" ? "ДРУГОЕ" : `КРОВАТЬ ${groupKey}`;
 
       const list = document.createElement("div");
       list.className = "sku-catalog-column-list";
 
-      const entries = sortGroupItems(groups.get(groupKey) || []);
-      entries.forEach(({ item }) => {
+      const entries = (groups[groupKey] || []).sort(sortSku);
+      entries.forEach(({ item, meta }) => {
         const row = document.createElement("div");
         row.className = "sku-catalog-row";
 
@@ -923,7 +968,7 @@
 
         const name = document.createElement("div");
         name.className = "sku-catalog-meta";
-        name.innerHTML = `<div>${item.name || "—"}</div><div>${item.model_code || ""} • ${item.width_cm || ""} см • ${item.fabric_code || ""} • ${item.color_code || ""}</div>`;
+        name.innerHTML = `<div>${item.name || "—"}</div><div>${meta.modelCode || ""} • ${meta.sizeRaw || ""} см • ${meta.fabricCode || ""} • ${meta.colorRaw || ""}</div>`;
 
         const status = document.createElement("div");
         status.className = "sku-catalog-meta";
@@ -982,7 +1027,7 @@
 
   function renderSkuCatalog(items) {
     if (!skuCatalogList) return;
-    const groups = groupCatalogSkus(items || []);
+    const groups = groupSkuRows(items || []);
     renderSkuCatalogGrid(groups);
   }
 
