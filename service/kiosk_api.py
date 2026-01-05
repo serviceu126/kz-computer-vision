@@ -26,6 +26,8 @@ from core.storage import (
     get_active_shift_plan,
     set_active_shift_plan,
     clear_active_shift_plan,
+    get_shift_plan_progress_map,
+    increment_shift_plan_progress,
     get_sku_catalog_map,
     get_kiosk_setting,
     get_kiosk_settings,
@@ -36,9 +38,12 @@ from core.storage import (
     update_master_last_active,
     list_sku_catalog,
     create_sku_catalog_item,
+    get_sku_catalog_item_by_code,
     update_sku_catalog_item,
     update_sku_catalog_item_full,
+    update_sku_catalog_item_full_by_code,
     delete_sku_catalog_item,
+    delete_sku_catalog_item_by_code,
     get_report_rows,
     get_sku_catalog_validation_data,
     list_queue_items,
@@ -47,6 +52,11 @@ from core.storage import (
     remove_queue_item,
     reorder_queue_items,
     replace_queue_items,
+)
+from core.sku import (
+    build_canonical_sku,
+    normalize_canonical_sku,
+    parse_sku,
 )
 from services.packaging import (
     advance_phase,
@@ -242,6 +252,17 @@ class SkuUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
+class SkuCatalogUpsertRequest(BaseModel):
+    sku_code: str
+    model_code: str
+    width_cm: int
+    fabric_code: str
+    color_code: str
+    name: str
+    is_active: Optional[bool] = True
+    previous_sku_code: Optional[str] = None
+
+
 class ReportSaveRequest(BaseModel):
     report_type: str
     date_from: str
@@ -414,16 +435,11 @@ def validate_sku_format(raw: str) -> tuple[str | None, str | None]:
     Канон: MM.Кровать.NNN-NN.Модель.XX
     Никаких автоматических исправлений — только проверка.
     """
-    sku_raw = (raw or "").strip()
-    if not sku_raw:
-        return None, "SKU пустой после очистки."
-
-    # Учительская подсказка: допускаем только точное совпадение с шаблоном.
-    pattern = re.compile(r"^MM\.Кровать\.\d{3}-\d{1,2}\.[A-Za-z0-9]+\.\d{2}$")
-    if not pattern.match(sku_raw):
-        return None, "Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07."
-
-    return sku_raw, None
+    try:
+        normalized = normalize_canonical_sku(raw)
+    except ValueError as exc:
+        return None, str(exc)
+    return normalized, None
 
 
 def parse_shift_plan_csv_file(text: str) -> tuple[list[dict], list[str]]:
@@ -464,6 +480,11 @@ def parse_shift_plan_csv_file(text: str) -> tuple[list[dict], list[str]]:
         qty_raw = (row[1] if len(row) > 1 else "").strip()
         if not sku_code:
             errors.append(f"Строка {row_index}: SKU не указан.")
+            continue
+        try:
+            sku_code = normalize_canonical_sku(sku_code)
+        except ValueError as exc:
+            errors.append(f"Строка {row_index}: {exc}")
             continue
         if qty_raw:
             try:
@@ -517,6 +538,11 @@ def parse_shift_plan_json_file(text: str) -> tuple[str, list[dict], list[str]]:
             errors.append(f"Строка {index}: SKU не указан.")
             continue
         try:
+            sku_code = normalize_canonical_sku(sku_code)
+        except ValueError as exc:
+            errors.append(f"Строка {index}: {exc}")
+            continue
+        try:
             qty = int(qty_raw)
         except (TypeError, ValueError):
             errors.append(f"Строка {index}: количество '{qty_raw}' не является числом.")
@@ -567,20 +593,6 @@ def format_timestamp(ts_value: float | None) -> str:
     return datetime.fromtimestamp(ts_value).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def build_canonical_sku(model_code: str, width_cm: int, fabric_code: str, color_code: str) -> str:
-    """
-    Собираем SKU в строгом каноническом формате.
-
-    Канон: MM.Кровать.NNN-NN.Модель.XX
-    """
-    model = (model_code or "").strip()
-    # Учительская подсказка: размер берём как ввёл пользователь (например 16).
-    width = str(int(width_cm))
-    fabric = (fabric_code or "").strip()
-    color_raw = str(color_code or "").strip()
-    color = color_raw.zfill(2)[-2:]
-    return f"MM.Кровать.{model}-{width}.{fabric}.{color}"
-
 def parse_shift_plan_csv(
     text: str,
     active_sku_codes: set[str],
@@ -630,6 +642,11 @@ def parse_shift_plan_csv(
         if not sku_raw:
             errors.append(f"Строка {line_no}: SKU не указан.")
             continue
+        try:
+            sku_raw = normalize_canonical_sku(sku_raw)
+        except ValueError as exc:
+            errors.append(f"Строка {line_no}: {exc}")
+            continue
         if not qty_raw:
             errors.append(f"Строка {line_no}: количество не указано.")
             continue
@@ -643,7 +660,9 @@ def parse_shift_plan_csv(
             continue
 
         if validate_against_catalog and sku_raw not in active_sku_codes:
-            errors.append(f"Строка {line_no}: SKU '{sku_raw}' отсутствует или неактивен в каталоге.")
+            errors.append(
+                f"Строка {line_no}: SKU '{sku_raw}' отсутствует или неактивен в каталоге."
+            )
             continue
 
         # Повторяющиеся SKU суммируем, а порядок берём по первой встрече.
@@ -1088,16 +1107,42 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
 
     items = [item.strip() for item in raw_items if item and item.strip()]
     if not items:
-        raise HTTPException(status_code=400, detail="Список SKU пуст.")
+        raise HTTPException(status_code=422, detail="Список SKU пуст.")
+
+    # Учительская подсказка: нормализуем SKU и проверяем наличие в каталоге,
+    # чтобы в план не попадали случайные или устаревшие коды.
+    catalog_items = list_sku_catalog(include_inactive=False)
+    catalog_map = {row["sku_code"]: row for row in catalog_items}
+    errors: list[str] = []
+    aggregated: dict[str, int] = {}
+    order: list[str] = []
+
+    for raw in items:
+        try:
+            sku_code = normalize_canonical_sku(raw)
+        except ValueError as exc:
+            errors.append(f"SKU '{raw}': {exc}")
+            continue
+        if catalog_map and sku_code not in catalog_map:
+            errors.append(f"SKU '{sku_code}' отсутствует в каталоге.")
+            continue
+        if sku_code not in aggregated:
+            aggregated[sku_code] = 1
+            order.append(sku_code)
+        else:
+            aggregated[sku_code] += 1
+
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
 
     name = (payload.name or "Сменное задание").strip()
-    plan_id = create_shift_plan(
+    plan_id = create_shift_plan_with_items(
         shift_id=shift_id,
         name=name,
         created_at=time.time(),
-        items_json=json.dumps(items, ensure_ascii=False),
+        items=[{"sku_code": sku, "qty": aggregated[sku]} for sku in order],
     )
-    return {"status": "ok", "id": plan_id, "name": name, "count": len(items)}
+    return {"status": "ok", "id": plan_id, "name": name, "count": len(order)}
 
 
 @app.post("/api/kiosk/shift_plan/import_csv")
@@ -1145,11 +1190,11 @@ async def shift_plan_import_csv(request: Request):
 
     if errors:
         # Если есть ошибки — ничего не меняем, импорт атомарный.
-        return JSONResponse(status_code=400, content={"ok": False, "errors": errors})
+        return JSONResponse(status_code=422, content={"ok": False, "errors": errors})
 
     if not items:
         return JSONResponse(
-            status_code=400,
+            status_code=422,
             content={"ok": False, "errors": ["Нет валидных строк."]},
         )
 
@@ -1163,23 +1208,31 @@ async def shift_plan_get():
     """
     Возвращает активный сменный план или пустой ответ.
     """
-    plan = get_active_shift_plan()
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        return {"plan": None}
+    plan = get_active_shift_plan(shift_id)
     if not plan:
         return {"plan": None}
 
     sku_codes = [item["sku_code"] for item in plan.get("items", [])]
     sku_map = get_sku_catalog_map(sku_codes)
     unknown_skus = [sku for sku in sku_codes if sku not in sku_map]
+    progress_map = get_shift_plan_progress_map(shift_id, int(plan["id"]))
     normalized_items = []
     for item in plan.get("items", []):
         sku_code = item["sku_code"]
         sku_meta = sku_map.get(sku_code) or {}
+        done_qty = int(progress_map.get(sku_code, 0))
+        qty = int(item["qty"])
         normalized_items.append(
             {
                 "sku_code": sku_code,
-                "qty": int(item["qty"]),
+                "qty": qty,
                 "position": int(item["position"]),
                 "name": sku_meta.get("name"),
+                "done_qty": done_qty,
+                "remaining_qty": max(qty - done_qty, 0),
             }
         )
 
@@ -1188,6 +1241,7 @@ async def shift_plan_get():
             "id": plan["id"],
             "plan_name": plan["name"],
             "created_at": plan["created_at"],
+            "shift_id": plan["shift_id"],
             "items": normalized_items,
         },
         "unknown_skus": unknown_skus,
@@ -1243,31 +1297,26 @@ async def shift_plan_import(file: UploadFile = File(...)):
     items, errors = parse_shift_plan_csv_file(text)
 
     if errors:
-        return JSONResponse(status_code=400, content={"errors": errors})
+        return JSONResponse(status_code=422, content={"errors": errors})
     if not items:
-        return JSONResponse(status_code=400, content={"errors": ["Нет валидных строк."]})
+        return JSONResponse(status_code=422, content={"errors": ["Нет валидных строк."]})
 
     if not plan_name:
         plan_name = (Path(file.filename).stem or "Сменное задание").strip()
     if not plan_name:
         plan_name = "Сменное задание"
 
-    # Учительская подсказка: загружаем активный каталог и валидируем формат SKU.
+    # Учительская подсказка: загружаем активный каталог и сверяем коды.
     catalog_items = list_sku_catalog(include_inactive=False)
     catalog_map = {row["sku_code"]: row for row in catalog_items}
 
     normalized_items = []
-    unknown_skus: list[str] = []
     items_for_storage: list[dict] = []
     for item in items:
-        raw_code = item["sku_code"]
-        sku_code, reason = validate_sku_format(raw_code)
-        if not sku_code:
-            errors.append(f"SKU '{raw_code}': {reason}")
-            continue
+        sku_code = item["sku_code"]
         if catalog_map and sku_code not in catalog_map:
-            unknown_skus.append(raw_code.strip())
-
+            errors.append(f"SKU '{sku_code}' отсутствует в каталоге.")
+            continue
         sku_meta = catalog_map.get(sku_code) or {}
         normalized_items.append(
             {
@@ -1279,14 +1328,11 @@ async def shift_plan_import(file: UploadFile = File(...)):
         items_for_storage.append({"sku_code": sku_code, "qty": int(item["qty"])})
 
     if errors:
-        return JSONResponse(status_code=400, content={"errors": errors})
+        return JSONResponse(status_code=422, content={"errors": errors})
 
-    # Убираем дубликаты, чтобы предупреждение было коротким и понятным.
-    unknown_skus = list(dict.fromkeys([sku for sku in unknown_skus if sku]))
-
-    # Если смены нет, сохраняем с нулевым shift_id,
-    # чтобы мастер всё равно мог подготовить план заранее.
-    shift_id = get_active_shift_id() or 0
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
     plan_id = create_shift_plan_with_items(
         shift_id=shift_id,
         name=plan_name,
@@ -1298,7 +1344,6 @@ async def shift_plan_import(file: UploadFile = File(...)):
         "plan_id": plan_id,
         "plan_name": plan_name,
         "total_items": len(items_for_storage),
-        "unknown_skus": unknown_skus,
         "normalized_items": normalized_items,
     }
 
@@ -1311,10 +1356,16 @@ async def shift_plan_activate(payload: ShiftPlanActivateRequest):
     ensure_master_mode()
     update_master_activity()
 
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
+
     row = get_shift_plan(payload.plan_id)
     if not row:
         raise HTTPException(status_code=404, detail="План не найден.")
-    set_active_shift_plan(payload.plan_id)
+    if int(row["shift_id"]) != int(shift_id):
+        raise HTTPException(status_code=409, detail="План не относится к активной смене.")
+    set_active_shift_plan(shift_id, payload.plan_id)
     return {"status": "ok", "plan_id": payload.plan_id}
 
 
@@ -1325,7 +1376,10 @@ async def shift_plan_clear():
     """
     ensure_master_mode()
     update_master_activity()
-    clear_active_shift_plan()
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
+    clear_active_shift_plan(shift_id)
     return {"status": "ok"}
 
 
@@ -1561,6 +1615,106 @@ async def sku_catalog_list():
     }
 
 
+@app.post("/api/kiosk/sku_catalog")
+async def sku_catalog_upsert(payload: SkuCatalogUpsertRequest):
+    """
+    Создаёт или обновляет SKU по его коду.
+
+    Учительская ремарка:
+    - редактировать каталог может только мастер;
+    - sku_code остаётся каноническим и единым для UI и БД.
+    """
+    ensure_master_mode()
+    try:
+        sku_from_parts = normalize_canonical_sku(
+            build_canonical_sku(
+                model_code=payload.model_code,
+                width_cm=payload.width_cm,
+                fabric_code=payload.fabric_code,
+                color_code=payload.color_code,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        payload_code = normalize_canonical_sku(payload.sku_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if payload_code != sku_from_parts:
+        raise HTTPException(
+            status_code=422,
+            detail="SKU не совпадает с параметрами. Проверьте модель, ширину, ткань и цвет.",
+        )
+
+    parsed = parse_sku(sku_from_parts)
+    if not parsed:
+        raise HTTPException(
+            status_code=422,
+            detail="SKU не удалось разобрать. Проверьте формат MM.Кровать.001-16.VelutaLux.07.",
+        )
+    sku_code = sku_from_parts
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Название SKU не должно быть пустым.")
+    previous_code = (payload.previous_sku_code or "").strip()
+    if previous_code:
+        try:
+            previous_code = normalize_canonical_sku(previous_code)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    target_code = previous_code or sku_code
+    existing = get_sku_catalog_item_by_code(target_code) if target_code else None
+    if previous_code and previous_code != sku_code:
+        # Учительская ремарка: при смене sku_code убеждаемся, что новый код не занят.
+        if get_sku_catalog_item_by_code(sku_code):
+            raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.")
+    try:
+        if existing:
+            update_sku_catalog_item_full_by_code(
+                current_sku_code=target_code,
+                new_sku_code=sku_code,
+                name=name,
+                model_code=f"{parsed['model_num']:03d}",
+                width_cm=int(parsed["size"]),
+                fabric_code=parsed["fabric"],
+                color_code=f"{parsed['color']:02d}",
+                is_active=1 if payload.is_active else 0,
+            )
+        else:
+            create_sku_catalog_item(
+                sku_code=sku_code,
+                name=name,
+                model_code=f"{parsed['model_num']:03d}",
+                width_cm=int(parsed["size"]),
+                fabric_code=parsed["fabric"],
+                color_code=f"{parsed['color']:02d}",
+                is_active=1 if payload.is_active else 0,
+            )
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.") from exc
+    return {"ok": True, "sku": get_sku_catalog_item_by_code(sku_code)}
+
+
+@app.delete("/api/kiosk/sku_catalog/{sku_code}")
+async def sku_catalog_delete(sku_code: str):
+    """
+    Удаляет SKU по коду.
+
+    Учительская ремарка:
+    - удалять может только мастер;
+    - sku_code берём из URL, чтобы удаление было прозрачным.
+    """
+    ensure_master_mode()
+    try:
+        canonical = normalize_canonical_sku(sku_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    delete_sku_catalog_item_by_code(canonical)
+    return {"ok": True}
+
+
 @app.post("/api/kiosk/sku")
 async def sku_create(payload: SkuCreateRequest):
     """
@@ -1568,29 +1722,35 @@ async def sku_create(payload: SkuCreateRequest):
     """
     ensure_master_mode()
     # Учительская подсказка: строим SKU из полей и строго валидируем формат.
-    draft_code = build_canonical_sku(
-        model_code=payload.model_code,
-        width_cm=payload.width_cm,
-        fabric_code=payload.fabric_code,
-        color_code=payload.color_code,
-    )
-    sku_code, reason = validate_sku_format(draft_code)
-    if not sku_code:
+    try:
+        sku_code = normalize_canonical_sku(
+            build_canonical_sku(
+                model_code=payload.model_code,
+                width_cm=payload.width_cm,
+                fabric_code=payload.fabric_code,
+                color_code=payload.color_code,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    parsed = parse_sku(sku_code)
+    if not parsed:
         raise HTTPException(
-            status_code=400,
-            detail=reason or "Неверный формат SKU. Ожидается MM.Кровать.001-16.VelutaLux.07.",
+            status_code=422,
+            detail="SKU не удалось разобрать. Проверьте формат MM.Кровать.001-16.VelutaLux.07.",
         )
     name = payload.name.strip()
     if not sku_code or not name:
-        raise HTTPException(status_code=400, detail="SKU и имя не должны быть пустыми.")
+        raise HTTPException(status_code=422, detail="SKU и имя не должны быть пустыми.")
     try:
         sku_id = create_sku_catalog_item(
             sku_code=sku_code,
             name=name,
-            model_code=payload.model_code.strip(),
-            width_cm=int(payload.width_cm),
-            fabric_code=payload.fabric_code.strip(),
-            color_code=payload.color_code.strip(),
+            model_code=f"{parsed['model_num']:03d}",
+            width_cm=int(parsed["size"]),
+            fabric_code=parsed["fabric"],
+            color_code=f"{parsed['color']:02d}",
             is_active=1 if payload.is_active else 0,
         )
     except sqlite3.IntegrityError:
@@ -1606,31 +1766,33 @@ async def sku_update(sku_id: int, payload: SkuUpdateRequest):
     ensure_master_mode()
     if payload.model_code is not None or payload.width_cm is not None or payload.fabric_code is not None:
         # Учительская подсказка: при полном редактировании пересобираем SKU и валидируем его.
-        model_code = (payload.model_code or "").strip()
-        width_cm = int(payload.width_cm or 0)
-        fabric_code = (payload.fabric_code or "").strip()
-        color_code = (payload.color_code or "").strip()
-        sku_code = build_canonical_sku(
-            model_code=model_code,
-            width_cm=width_cm,
-            fabric_code=fabric_code,
-            color_code=color_code,
-        )
-        sku_code, reason = validate_sku_format(sku_code)
-        if not sku_code:
+        try:
+            sku_code = normalize_canonical_sku(
+                build_canonical_sku(
+                    model_code=payload.model_code or "",
+                    width_cm=payload.width_cm or "",
+                    fabric_code=payload.fabric_code or "",
+                    color_code=payload.color_code or "",
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        parsed = parse_sku(sku_code)
+        if not parsed:
             raise HTTPException(
-                status_code=400,
-                detail=reason or "Неверный формат SKU. Пример: MM.Кровать.001-16.VelutaLux.07.",
+                status_code=422,
+                detail="SKU не удалось разобрать. Проверьте формат MM.Кровать.001-16.VelutaLux.07.",
             )
         try:
             update_sku_catalog_item_full(
                 sku_id=sku_id,
                 sku_code=sku_code,
                 name=(payload.name or "").strip(),
-                model_code=model_code,
-                width_cm=width_cm,
-                fabric_code=fabric_code,
-                color_code=color_code,
+                model_code=f"{parsed['model_num']:03d}",
+                width_cm=int(parsed["size"]),
+                fabric_code=parsed["fabric"],
+                color_code=f"{parsed['color']:02d}",
                 is_active=1 if payload.is_active else 0,
             )
         except sqlite3.IntegrityError as exc:
