@@ -2731,7 +2731,7 @@ document.getElementById("bedDetails").textContent =
     }
   }
 
-  async function fetchShiftPlanFromBackend() {
+  async function fetchShiftPlanFromBackend(options = {}) {
     /**
      * Учительская подсказка: читаем статус плана ТОЛЬКО для подсказок,
      * не трогая ручной список (shiftPlanSelected) и localStorage.
@@ -3783,7 +3783,7 @@ function mkModalBtn(text, kind, onClick) {
      * но не трогаем ручной список оператора.
      */
     try {
-      await fetchShiftPlanFromBackend();
+      await fetchShiftPlanFromBackend({ force: true });
       return true;
     } catch (error) {
       return false;
