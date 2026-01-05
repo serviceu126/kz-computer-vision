@@ -1960,6 +1960,7 @@
   let shiftPlanUserActive = false;
   let shiftPlanUserActiveTimer = null;
   let shiftPlanPanelSignature = "";
+  let lastRenderedPlanHash = "";
 
   // Настройки прав оператора приходят из backend.
   // Здесь держим их как единый объект, чтобы функции могли опираться на них.
@@ -2785,6 +2786,18 @@ document.getElementById("bedDetails").textContent =
      */
     const listEl = document.getElementById("shiftPlanList");
     if (!listEl) return;
+    const hash = JSON.stringify(
+      (items || []).map((item) => [
+        normalizeShiftPlanSku(item.sku),
+        item.qty,
+        item.position,
+      ])
+    );
+    if (hash === lastRenderedPlanHash) {
+      return;
+    }
+    const scrollTop = listEl.scrollTop;
+    const selectedSku = shiftPlanSelectedSku;
     listEl.innerHTML = "";
 
     if (!items || !items.length) {
@@ -2886,6 +2899,47 @@ document.getElementById("bedDetails").textContent =
     });
 
     updateShiftPlanControlsAvailability();
+    lastRenderedPlanHash = hash;
+    if (selectedSku && items.some((item) => item.sku === selectedSku)) {
+      shiftPlanSelectedSku = selectedSku;
+    }
+    listEl.scrollTop = scrollTop;
+  }
+
+  function buildShiftPlanQtyLabel(item) {
+    /**
+     * Учительская подсказка: формируем короткую подпись для количества,
+     * чтобы оператор видел и план, и прогресс без отдельной верстки.
+     */
+    const qty = item?.qty ?? 0;
+    const remaining = item?.remaining_qty;
+    if (remaining === undefined || remaining === null) {
+      return `×${qty}`;
+    }
+    return `×${qty} • осталось ${remaining}`;
+  }
+
+  function updateShiftPlanProgress(items) {
+    /**
+     * Учительская подсказка: обновляем только числа прогресса,
+     * не пересоздавая весь список и не сбивая фокус/скролл.
+     */
+    const listEl = document.getElementById("shiftPlanList");
+    if (!listEl) return;
+    const map = new Map();
+    (items || []).forEach((item) => {
+      map.set(normalizeShiftPlanSku(item.sku), buildShiftPlanQtyLabel(item));
+    });
+    listEl.querySelectorAll(".shift-plan-row").forEach((row) => {
+      const sku = row.dataset.sku || "";
+      if (!map.has(sku)) return;
+      const qtyEl = row.querySelector(".shift-plan-qty");
+      if (!qtyEl) return;
+      const nextText = map.get(sku);
+      if (qtyEl.textContent !== nextText) {
+        qtyEl.textContent = nextText;
+      }
+    });
   }
 
   function buildShiftPlanQtyLabel(item) {
@@ -3811,6 +3865,7 @@ function mkModalBtn(text, kind, onClick) {
      * Это удерживает сетевую логику в одном месте и упрощает поддержку.
      */
     if (!file) return;
+    window.showPackToast?.(`Файл выбран: ${file.name}. Начинаю импорт...`);
     const isMasterActive = document.body.classList.contains("is-master-active");
     if (!isMasterActive && !operatorSettings.allow_shift_plan_import) {
       showPackToast("Импорт запрещен настройками мастера.");
@@ -3820,6 +3875,7 @@ function mkModalBtn(text, kind, onClick) {
       showPackToast("Импорт временно недоступен.");
       return;
     }
+    console.log("Импорт сменного задания: отправляем файл на backend.");
     await window.importShiftPlanFile(file);
   }
 
@@ -3858,11 +3914,19 @@ function mkModalBtn(text, kind, onClick) {
       }
       shiftPlanImportFile.click();
     });
-    shiftPlanImportFile.addEventListener("change", () => {
-      const file = shiftPlanImportFile.files && shiftPlanImportFile.files[0];
-      triggerShiftPlanImport(file);
-      shiftPlanImportFile.value = "";
-    });
+    if (!shiftPlanImportFile.dataset.bound) {
+      shiftPlanImportFile.dataset.bound = "1";
+      shiftPlanImportFile.addEventListener("change", async () => {
+        const file = shiftPlanImportFile.files && shiftPlanImportFile.files[0];
+        shiftPlanImportFile.value = "";
+        if (!file) return;
+        try {
+          await triggerShiftPlanImport(file);
+        } catch (error) {
+          showPackToast(`Ошибка импорта: ${error}`);
+        }
+      });
+    }
   }
   if (btnShiftPlanUploadMaster && shiftPlanFileInput) {
     btnShiftPlanUploadMaster.addEventListener("click", () => {
@@ -3870,15 +3934,25 @@ function mkModalBtn(text, kind, onClick) {
        * Учительская подсказка: выбор файла запускаем через скрытый input,
        * чтобы интерфейс оставался «киосковым» и предсказуемым.
        */
+      if (btnShiftPlanUploadMaster.classList.contains("pill-btn--disabled")) {
+        showPackToast("Импорт доступен только мастеру или при разрешении в настройках.");
+        return;
+      }
       shiftPlanFileInput.click();
     });
-    shiftPlanFileInput.addEventListener("change", async () => {
-      const file = shiftPlanFileInput.files && shiftPlanFileInput.files[0];
-      if (file && typeof window.importShiftPlanFile === "function") {
-        await window.importShiftPlanFile(file);
-      }
-      shiftPlanFileInput.value = "";
-    });
+    if (!shiftPlanFileInput.dataset.bound) {
+      shiftPlanFileInput.dataset.bound = "1";
+      shiftPlanFileInput.addEventListener("change", async () => {
+        const file = shiftPlanFileInput.files && shiftPlanFileInput.files[0];
+        shiftPlanFileInput.value = "";
+        if (!file) return;
+        try {
+          await triggerShiftPlanImport(file);
+        } catch (error) {
+          showPackToast(`Ошибка импорта: ${error}`);
+        }
+      });
+    }
   }
   if (btnShiftPlanClearMaster) {
     btnShiftPlanClearMaster.addEventListener("click", async () => {
