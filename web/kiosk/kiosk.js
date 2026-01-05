@@ -16,6 +16,8 @@
   // UI-элементы мастера: кнопки, модалка, статус.
   const btnMasterLogin = document.getElementById("btnMasterLogin");
   const btnMasterLogout = document.getElementById("btnMasterLogout");
+  const masterButtonsContainer = btnMasterLogin?.parentElement || null;
+  const masterButtonsAnchor = document.getElementById("btnEndShift");
   const masterStatus = document.getElementById("masterStatus");
 
   const masterLoginBackdrop = document.getElementById("masterLoginBackdrop");
@@ -92,6 +94,50 @@
      */
     return (value || "").toString().trim();
   }
+
+  function insertAfter(parent, node, afterNode) {
+    /**
+     * Учительская подсказка: вставляем кнопку после опорного элемента,
+     * чтобы порядок "Добавить -> Завершить -> Мастер" оставался привычным.
+     */
+    if (!parent || !node) return;
+    if (!afterNode || afterNode.parentElement !== parent) {
+      parent.appendChild(node);
+      return;
+    }
+    parent.insertBefore(node, afterNode.nextSibling);
+  }
+
+  function updateMasterActionButtons(isMaster) {
+    /**
+     * Учительская подсказка: кнопка входа и выхода не должны жить одновременно.
+     *
+     * Правило:
+     * - мастер вошёл -> показываем только "Выйти (мастер)";
+     * - мастер не вошёл -> показываем только "Войти как мастер".
+     */
+    if (!masterButtonsContainer) return;
+    if (isMaster) {
+      if (btnMasterLogin && btnMasterLogin.isConnected) {
+        btnMasterLogin.remove();
+      }
+      if (btnMasterLogout && !btnMasterLogout.isConnected) {
+        btnMasterLogout.classList.remove("master-hidden");
+        insertAfter(masterButtonsContainer, btnMasterLogout, masterButtonsAnchor);
+      }
+    } else {
+      if (btnMasterLogout && btnMasterLogout.isConnected) {
+        btnMasterLogout.remove();
+      }
+      if (btnMasterLogin && !btnMasterLogin.isConnected) {
+        insertAfter(masterButtonsContainer, btnMasterLogin, masterButtonsAnchor);
+      }
+    }
+  }
+
+  // Учительская подсказка: делаем обновление кнопок доступным из index.html,
+  // чтобы реакция на state была единой и не зависела от порядка загрузки.
+  window.updateMasterActionButtons = updateMasterActionButtons;
 
   function normalizeSku(value) {
     /**
@@ -210,14 +256,12 @@
     if (masterStatus) {
       masterStatus.textContent = masterId ? `Мастер: ${masterId}` : "Мастер: —";
     }
-    if (btnMasterLogout) {
-      btnMasterLogout.classList.toggle("master-hidden", !masterId);
-    }
     if (btnMasterLogoutSettings) {
       btnMasterLogoutSettings.classList.toggle("master-hidden", !masterId);
     }
     currentMasterId = masterId || null;
     uiMasterActive = !!currentMasterId;
+    updateMasterActionButtons(uiMasterActive);
     document.body.classList.toggle("is-master-active", uiMasterActive);
     refreshMasterTimeout();
   updateSettingsAvailability();
@@ -239,6 +283,7 @@
      */
     currentMasterId = masterId || null;
     uiMasterActive = !!currentMasterId;
+    updateMasterActionButtons(uiMasterActive);
     document.body.classList.toggle("is-master-active", uiMasterActive);
     refreshMasterTimeout();
     updateSettingsAvailability();

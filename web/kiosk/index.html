@@ -2246,8 +2246,9 @@
     if (masterStatusEl) {
       masterStatusEl.textContent = masterId ? `Мастер: ${masterId}` : "Мастер: —";
     }
-    if (btnMasterLogout) {
-      btnMasterLogout.classList.toggle("master-hidden", !masterId);
+    if (typeof window.updateMasterActionButtons === "function") {
+      // Учительская подсказка: кнопки входа/выхода рендерим по текущему state.
+      window.updateMasterActionButtons(!!masterId);
     }
     if (window.syncMasterState) {
       window.syncMasterState(masterId);

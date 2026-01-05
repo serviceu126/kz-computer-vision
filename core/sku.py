@@ -64,7 +64,7 @@ def normalize_canonical_sku(raw: str) -> str:
         return f"{prefix}.{fabric}.{color}"
 
     raise ValueError(
-        "Неверный формат SKU. Ожидается MM.Кровать.001-16.VelutaLux.07"
+        "Неверный формат SKU. Ожидается MM.Кровать.001-16.VelutaLux.07."
     )
 
 
