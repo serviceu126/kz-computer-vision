@@ -1151,14 +1151,11 @@
                   <span id="shiftInfo">Смена не выбрана</span>
                 </span>
               </div>
-              <div class="panel-sub" id="workerStats">
-                Сегодня: 0 кроватей, простоев 0 мин
-              </div>
               <div class="panel-sub" id="workerScanHint"></div>
               <!-- Статус мастера: показываем, кто имеет доступ к ручным действиям. -->
               <div class="master-status" id="masterStatus">Мастер: —</div>
 
-              <div class="pill-row">
+              <div class="pill-row pill-row--start worker-actions">
                 <div id="btnAddWorker" class="pill-btn" role="button" tabindex="0">
                   <span class="dot"></span>
                   <span>Добавить сотрудника</span>
@@ -2235,7 +2232,12 @@
         workerScanHintEl.textContent = `Активный РЦ: ${centers}`;
       }
     } else {
-      const nums = workers.map(w => w.replace(/^W/i, "")).join(", ");
+      const nums = workers
+        .map((workerId) => workerId.replace(/^W/i, "").trim())
+        .filter((workerId) => workerId.length > 0)
+        // Учительская подсказка: каждый номер оборачиваем в "СОТРУДНИК".
+        .map((workerId) => `СОТРУДНИК ${workerId}`)
+        .join(", ");
       document.getElementById("workerName").textContent = `Команда: ${nums}`;
     }
 
@@ -2269,8 +2271,6 @@
 
     document.getElementById("shiftInfo").textContent =
       state.shift_active ? "Смена активна" : (state.shift_label || "Смена не выбрана");
-    document.getElementById("workerStats").textContent =
-      state.worker_stats || "Сегодня: 0 кроватей, простоев 0 мин";
 
 // ───────── Кровать: крупно SKU + снизу пояснение ─────────
 
@@ -2314,7 +2314,10 @@ document.getElementById("bedDetails").textContent =
     if (state.camera_stream_url) {
       const img = document.getElementById("cameraImage");
       const url = state.camera_stream_url;
-      img.src = url.includes("?") ? url + "&t=" + Date.now() : url + "?t=" + Date.now();
+      if (img) {
+        // Учительская подсказка: берём URL только из state, относительный оставляем как есть.
+        img.src = url;
+      }
     }
     const ws = state.worker_state || "idle";
     document.getElementById("workerStateLabel").textContent =
@@ -2736,6 +2739,7 @@ document.getElementById("bedDetails").textContent =
      * Учительская подсказка: читаем статус плана ТОЛЬКО для подсказок,
      * не трогая ручной список (shiftPlanSelected) и localStorage.
      */
+    const applyToLocal = !!options.applyToLocal;
     try {
       const resp = await fetch("/api/kiosk/shift_plan", { cache: "no-store" });
       if (!resp.ok) return;
@@ -2743,7 +2747,29 @@ document.getElementById("bedDetails").textContent =
       const plan = data.plan || null;
       const unknown = data.unknown_skus || [];
       renderShiftPlanStatus(plan, unknown);
-      // Важно: не перетираем shiftPlanSelected и не сбрасываем выбор.
+      if (!applyToLocal) return;
+      if (!plan) {
+        showPackToast("На сервере нет активного плана");
+        return;
+      }
+      const items = Array.isArray(plan.items) ? plan.items : [];
+      const newPlan = {
+        id: Date.now(),
+        name: plan.name || `Импорт ${new Date().toLocaleString()}`,
+        items: items.map((item) => ({
+          sku: item.sku_code,
+          qty: item.qty,
+          position: item.position,
+        })),
+      };
+      shiftPlanList.unshift(newPlan);
+      shiftPlanSelected = newPlan;
+      shiftPlanSelectedSku = null;
+      lastRenderedPlanHash = "";
+      saveShiftPlansToStorage();
+      renderShiftPlanPanel();
+      renderShiftPlanList(shiftPlanSelected.items);
+      renderPackPlanPreview();
     } catch (error) {
       console.warn("Не удалось получить сменный план:", error);
     }
@@ -3841,6 +3867,7 @@ function mkModalBtn(text, kind, onClick) {
     }
     console.log("Импорт сменного задания: отправляем файл на backend.");
     await window.importShiftPlanFile(file);
+    await fetchShiftPlanFromBackend({ force: true, applyToLocal: true });
   }
 
   if (btnManualToggle && manualControls) {
@@ -3865,7 +3892,7 @@ function mkModalBtn(text, kind, onClick) {
   if (btnShiftPlanUpload) {
     btnShiftPlanUpload.addEventListener("click", () => openShiftPlanUploadModal());
   }
-  if (btnShiftPlanImport && shiftPlanImportFile && !btnShiftPlanImport.dataset.bound) {
+  if (btnShiftPlanImport && !btnShiftPlanImport.dataset.bound) {
     btnShiftPlanImport.dataset.bound = "1";
     btnShiftPlanImport.addEventListener("click", () => {
       /**
@@ -3879,7 +3906,7 @@ function mkModalBtn(text, kind, onClick) {
       }
       shiftPlanImportFile.click();
     });
-    if (!shiftPlanImportFile.dataset.bound) {
+    if (shiftPlanImportFile && !shiftPlanImportFile.dataset.bound) {
       shiftPlanImportFile.dataset.bound = "1";
       shiftPlanImportFile.addEventListener("change", async () => {
         const file = shiftPlanImportFile.files && shiftPlanImportFile.files[0];
@@ -3893,7 +3920,7 @@ function mkModalBtn(text, kind, onClick) {
       });
     }
   }
-  if (btnShiftPlanUploadMaster && shiftPlanFileInput && !btnShiftPlanUploadMaster.dataset.bound) {
+  if (btnShiftPlanUploadMaster && !btnShiftPlanUploadMaster.dataset.bound) {
     btnShiftPlanUploadMaster.dataset.bound = "1";
     btnShiftPlanUploadMaster.addEventListener("click", () => {
       /**
@@ -3906,7 +3933,7 @@ function mkModalBtn(text, kind, onClick) {
       }
       shiftPlanFileInput.click();
     });
-    if (!shiftPlanFileInput.dataset.bound) {
+    if (shiftPlanFileInput && !shiftPlanFileInput.dataset.bound) {
       shiftPlanFileInput.dataset.bound = "1";
       shiftPlanFileInput.addEventListener("change", async () => {
         const file = shiftPlanFileInput.files && shiftPlanFileInput.files[0];
