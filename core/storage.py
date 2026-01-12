@@ -1053,7 +1053,7 @@ def create_shift_plan_with_items(
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE shift_plans SET is_active=0 WHERE shift_id=? AND is_active=1",
+        "UPDATE shift_plans SET is_active=0 WHERE shift_id=?",
         [int(shift_id)],
     )
 

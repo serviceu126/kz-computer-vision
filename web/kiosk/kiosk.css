@@ -54,6 +54,20 @@
   color: var(--text-main);
 }
 
+/* Учительская подсказка: кнопки в блоке "Сотрудник" держим в ровной линии. */
+.worker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-md);
+}
+
+/* Учительская подсказка: строку статистики сотрудника скрываем до переноса. */
+.worker-stats-hidden {
+  display: none;
+}
+
 /* Мастер-вкладки и экраны скрываем, если мастер-режим не активен. */
 body:not(.is-master-active) .tab--master {
   display: none;
@@ -104,13 +118,8 @@ body:not(.is-master-active) .screen--master {
 
 /* Оператор: фиксируем три строки (верх/центр/низ) для стабильной высоты. */
 .screen-content--operator {
-  display: grid;
-  /* Сетка оператора: средняя зона ~70–80% высоты, низ — компактный информативный блок. */
-  grid-template-rows: minmax(120px, 160px) minmax(0, 0.75fr) minmax(120px, 0.25fr);
-  grid-template-areas:
-    "top"
-    "middle"
-    "bottom";
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2xl);
   min-height: 0;
   overflow: hidden;
@@ -355,10 +364,13 @@ body:not(.is-master-active) .screen--master {
 
 .middle {
   grid-area: middle;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .bottom {
   grid-area: bottom;
+  margin-top: auto;
 }
 
 .bottom {
@@ -368,6 +380,7 @@ body:not(.is-master-active) .screen--master {
 /* Средняя зона: фиксируем ширину правой колонки, чтобы камера была крупной. */
 .middle {
   grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  align-items: stretch;
 }
 
 /* Нижняя строка должна быть компактной, поэтому задаём общую высоту. */
@@ -392,6 +405,9 @@ body:not(.is-master-active) .screen--master {
 
 /* Правая колонка может прокручиваться, если блоки не помещаются. */
 .right-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -399,6 +415,7 @@ body:not(.is-master-active) .screen--master {
 .panel--steps {
   /* Поднимаем минимальную высоту, чтобы блок не сжимался рядом с рабочим столом. */
   min-height: 300px;
+  flex: 1 1 auto;
 }
 
 /* Список событий прокручивается внутри панели, а не всей страницы. */
