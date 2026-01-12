@@ -133,7 +133,7 @@ class KioskEngine:
         self._avg_pack_per_sku = {}
 
         # статический поток камеры (потом вынесём в конфиг)
-        self.camera_stream_url = "http://127.0.0.1:8080/stream"
+        self.camera_stream_url = "/camera/stream"
 
         # кэш активных смен (для быстрого состояния UI)
         self._active_shifts_cache: list[dict] = []
