@@ -76,6 +76,7 @@ from services.packaging import (
 )
 from services.timers import record_timer_state, record_heartbeat
 from services import shift_plans
+from service import mjpeg_server
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -149,7 +150,7 @@ class KioskState(BaseModel):
 
     events: List[Event]
 
-    camera_stream_url: str="http://127.0.0.1:8080/stream"
+    camera_stream_url: str = "/camera/stream"
     overlay_slots: List[OverlaySlot]
 
     # Режим мастера (супервайзер).
@@ -702,6 +703,7 @@ def build_usb_report_path(base_dir: Path, filename: str) -> Path:
 
 
 app = FastAPI(title="KZ Kiosk API")
+app.mount("/camera", mjpeg_server.app)
 
 app.mount(
     "/static",
