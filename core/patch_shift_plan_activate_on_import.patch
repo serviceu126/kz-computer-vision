@@ -1,0 +1,27 @@
+--- a/service/kiosk_api.py
++++ b/service/kiosk_api.py
+@@ -1340,10 +1340,24 @@
+         items=items_for_storage,
+     )
+ 
++    # ВАЖНО (объяснение по-учительски):
++    # Функция create_shift_plan_with_items() по задумке создаёт план активным.
++    # Но после правок UI/Backend (и особенно при наличии старых баз SQLite)
++    # часто всплывают ситуации, когда "план создан", но "активный план = null".
++    #
++    # Чтобы поведение было железобетонным и предсказуемым:
++    # 1) деактивируем старые планы ТОЛЬКО этой смены (shift_id);
++    # 2) делаем активным новый план.
++    #
++    # Так UI сможет сразу увидеть план через GET /api/kiosk/shift_plan.
++    set_active_shift_plan(shift_id, plan_id)
++
+     return {
+         "plan_id": plan_id,
+         "plan_name": plan_name,
+         "total_items": len(items_for_storage),
++        "shift_id": shift_id,
++        "activated": True,
+         "normalized_items": normalized_items,
+     }
+ 

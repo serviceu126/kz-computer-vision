@@ -1,0 +1,14 @@
+*** Begin Patch
+*** Update File: service/kiosk_api.py
+@@
+ from fastapi.staticfiles import StaticFiles
++
++# Подключаем роутер камеры (MJPEG) внутрь основного приложения киоска.
++# Так поток будет доступен на том же домене/порту (обычно :8000), что и UI.
++from service.camera_stream import router as camera_router
+@@
+ app = FastAPI()
++
++# Поток камеры: /camera/stream
++app.include_router(camera_router)
+*** End Patch
