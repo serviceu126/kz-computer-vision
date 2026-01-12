@@ -1227,7 +1227,7 @@
             </div>
             <div class="panel-body">
               <div class="camera-frame">
-                <img id="cameraImage" class="camera-image" src="" alt="Поток с камеры" />
+                <img id="cameraStream" class="camera-image" src="" alt="Поток с камеры" />
                 <div id="cameraOverlay" class="camera-overlay"></div>
               </div>
               <div class="camera-caption">
@@ -2311,13 +2311,13 @@ document.getElementById("bedDetails").textContent =
     const status = state.status || "idle";
     setStatus(status);
 
-    if (state.camera_stream_url) {
-      const img = document.getElementById("cameraImage");
-      const url = state.camera_stream_url;
-      if (img) {
-        // Учительская подсказка: берём URL только из state, относительный оставляем как есть.
-        img.src = url;
-      }
+    const cameraUrl = state.camera_stream_url || "/camera/stream";
+    const cameraImg = document.getElementById("cameraStream");
+    if (cameraImg && cameraImg.dataset.src !== cameraUrl) {
+      // Учительская подсказка: поток не перезапускаем, если URL не менялся.
+      cameraImg.src = cameraUrl;
+      cameraImg.dataset.src = cameraUrl;
+      console.log("[camera] set src", cameraUrl);
     }
     const ws = state.worker_state || "idle";
     document.getElementById("workerStateLabel").textContent =
