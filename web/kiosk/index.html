@@ -1151,14 +1151,13 @@
                   <span id="shiftInfo">Смена не выбрана</span>
                 </span>
               </div>
-              <div class="panel-sub" id="workerStats">
-                Сегодня: 0 кроватей, простоев 0 мин
-              </div>
+              <!-- Учительская подсказка: скрываем статистику здесь, перенесём в другое место. -->
+              <div class="panel-sub worker-stats-hidden" id="workerStats"></div>
               <div class="panel-sub" id="workerScanHint"></div>
               <!-- Статус мастера: показываем, кто имеет доступ к ручным действиям. -->
               <div class="master-status" id="masterStatus">Мастер: —</div>
 
-              <div class="pill-row">
+              <div class="pill-row pill-row--start worker-actions">
                 <div id="btnAddWorker" class="pill-btn" role="button" tabindex="0">
                   <span class="dot"></span>
                   <span>Добавить сотрудника</span>
@@ -2235,7 +2234,12 @@
         workerScanHintEl.textContent = `Активный РЦ: ${centers}`;
       }
     } else {
-      const nums = workers.map(w => w.replace(/^W/i, "")).join(", ");
+      const nums = workers.map((workerId) => {
+        const raw = workerId.replace(/^W/i, "").trim();
+        const upper = raw.toUpperCase();
+        // Учительская подсказка: не дублируем слово "СОТРУДНИК", если оно уже есть.
+        return upper.startsWith("СОТРУДНИК") ? raw : `СОТРУДНИК ${raw}`;
+      }).join(", ");
       document.getElementById("workerName").textContent = `Команда: ${nums}`;
     }
 
@@ -2269,8 +2273,11 @@
 
     document.getElementById("shiftInfo").textContent =
       state.shift_active ? "Смена активна" : (state.shift_label || "Смена не выбрана");
-    document.getElementById("workerStats").textContent =
-      state.worker_stats || "Сегодня: 0 кроватей, простоев 0 мин";
+    const workerStatsEl = document.getElementById("workerStats");
+    if (workerStatsEl) {
+      // Учительская подсказка: строку статистики пока скрываем, не показываем текст.
+      workerStatsEl.textContent = "";
+    }
 
 // ───────── Кровать: крупно SKU + снизу пояснение ─────────
 
