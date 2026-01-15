@@ -976,6 +976,10 @@
       color: var(--text-muted);
     }
 
+    .settings-hint--danger {
+      color: var(--danger-text);
+    }
+
     .settings-row input[type="checkbox"] {
       width: var(--space-2xl);
       height: var(--space-2xl);
@@ -1126,35 +1130,12 @@
     <!--<img src="/static/logo.png" class="logo-img" alt="Новые мебельные технологии" /> -->
   </div>
 
-  <!-- Основные вкладки: это такие же pill-кнопки, чтобы стиль был единым. -->
-  <div class="tabbar" id="mainTabbar">
-    <div class="pill-btn pill-btn--active tab tab--active" role="button" tabindex="0" data-screen="screenOperator">
-      <span class="dot"></span>
-      <span>Оператор</span>
-    </div>
-    <div class="pill-btn tab" role="button" tabindex="0" data-screen="screenQueue">
-      <span class="dot"></span>
-      <span>Очередь</span>
-    </div>
-    <!-- Вкладку "Управление" показываем только мастеру, чтобы не путать оператора. -->
-    <div class="pill-btn tab tab--hidden" role="button" tabindex="0" data-screen="screenManagement" id="tabManagement">
-      <span class="dot"></span>
-      <span>Управление</span>
-    </div>
-    <!-- Вкладка "Отчёты" доступна только мастеру, поэтому прячем её по умолчанию. -->
-    <div class="pill-btn tab tab--hidden" role="button" tabindex="0" data-screen="screenReports" id="tabReports">
-      <span class="dot"></span>
-      <span>Отчёты</span>
-    </div>
-    <div class="pill-btn tab" role="button" tabindex="0" data-screen="screenStats">
-      <span class="dot"></span>
-      <span>Статистика</span>
-    </div>
-  </div>
+  <!-- Вкладки рендерит kiosk.js, чтобы их можно было скрывать для мастера. -->
+  <div class="tabbar" id="mainTabbar"></div>
 
   <div class="container screens">
     <!-- Экран оператора: показываем только рабочие подсказки и состояние. -->
-    <div class="screen" id="screenOperator" data-active="true">
+    <div class="screen" id="tab-operator" data-active="true">
       <div class="container screen-content screen-content--operator">
         <!-- Верхняя строка: ключевые панели для оператора (без смены логики). -->
         <div class="top-bar">
@@ -1192,7 +1173,7 @@
                 </div>
                 <div id="btnMasterLogout" class="pill-btn master-hidden" role="button" tabindex="0">
                   <span class="dot"></span>
-                  <span>Выйти (мастер)</span>
+                  <span>Выйти как мастер</span>
                 </div>
               </div>
             </div>
@@ -1412,77 +1393,117 @@
     </div>
 
     <!-- Экран очереди: работа со сменным заданием и SKU. -->
-    <div class="screen" id="screenQueue" data-active="false">
-      <div class="container screen-content screen-content--compact">
-        <div class="panel panel--shift-plan" id="shiftPlanCard">
+    <div class="screen" id="tab-queue" data-active="false">
+      <div class="container screen-content screen-content--queue">
+        <div class="queue-shell">
+          <div class="panel panel--shift-plan queue-panel" id="shiftPlanCard">
           <div class="panel-header">
             <div class="panel-title">Сменное задание</div>
           </div>
-          <div class="panel-body">
-            <div class="pack-meta" id="shiftPlanName">План не выбран</div>
-            <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
-            <div class="shift-plan-rename">
-              <input id="shiftPlanRenameInput" class="shift-plan-input" placeholder="Название плана для смены" />
-              <div id="btnShiftPlanRename" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Переименовать</span>
+          <div class="panel-body queue-body">
+            <div class="queue-header">
+              <!-- Блок для мастера: загрузка и очистка сменного задания. -->
+              <div class="queue-master-bar master-only master-only-hidden">
+                <div class="queue-master-actions">
+                  <div id="btnShiftPlanUploadMaster" class="pill-btn pill-btn--primary" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Загрузить сменное задание</span>
+                  </div>
+                  <div id="btnShiftPlanClearMaster" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Очистить план</span>
+                  </div>
+                </div>
+                <div class="queue-master-status">
+                  <div class="pack-meta" id="shiftPlanStatusName">План: —</div>
+                  <div class="pack-meta" id="shiftPlanStatusCount">Позиции: —</div>
+                  <div class="pack-meta" id="shiftPlanStatusCreated">Загружен: —</div>
+                </div>
               </div>
+              <div class="queue-warning" id="shiftPlanUnknownWarning">Некоторые SKU не найдены в каталоге.</div>
+              <div class="queue-meta">
+                <div class="pack-meta" id="shiftPlanName">План не выбран</div>
+                <div class="pack-meta" id="shiftPlanCount">Количество SKU: —</div>
+              </div>
+              <div class="shift-plan-rename">
+                <input id="shiftPlanRenameInput" class="shift-plan-input" placeholder="Название плана для смены" />
+                <div id="btnShiftPlanRename" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Переименовать</span>
+                </div>
+              </div>
+              <div class="shift-plan-controls">
+                <input id="shiftPlanSkuInput" class="shift-plan-input" list="shiftPlanSkuCatalog"
+                       placeholder="SKU из каталога или вручную" />
+                <input id="shiftPlanQtyInput" class="shift-plan-input shift-plan-qty" type="number" min="1"
+                       value="1" placeholder="Количество" />
+                <div id="btnShiftPlanAdd" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Добавить</span>
+                </div>
+              </div>
+              <div class="shift-plan-sku-hint">Канон: MM.Кровать.001-16.VelutaLux.07</div>
+              <div class="shift-plan-catalog">
+                <div class="pack-meta">Быстрый выбор SKU</div>
+                <input id="shiftPlanCatalogSearch" class="shift-plan-input"
+                       placeholder="Поиск в каталоге SKU" />
+                <div class="shift-plan-catalog-list" id="shiftPlanCatalogList"></div>
+              </div>
+              <div class="pill-row pill-row--start queue-actions">
+                <div id="btnShiftPlanRemoveSelected" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Удалить выбранное</span>
+                </div>
+                <div id="btnShiftPlanMoveUp" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Вверх</span>
+                </div>
+                <div id="btnShiftPlanMoveDown" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Вниз</span>
+                </div>
+                <div id="btnShiftPlanSkip" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Пропустить SKU</span>
+                </div>
+                <div id="btnShiftPlanUpload" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Редактировать список</span>
+                </div>
+                <!-- Импорт CSV может быть разрешён оператору через настройки мастера. -->
+                <div id="btnShiftPlanImport" class="pill-btn pill-btn--import"
+                     role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Импорт сменного задания (CSV)</span>
+                </div>
+                <div class="shift-plan-import-hint" id="shiftPlanImportHint">
+                  Импорт доступен только мастеру или при разрешении в настройках.
+                </div>
+                <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
+                  <span class="dot"></span>
+                  <span>Выбрать из списка</span>
+                </div>
+              </div>
+              <input id="shiftPlanImportFile" class="file-input-hidden" type="file" accept=".csv,text/csv" />
+              <!-- Отдельный input для импорта плана (CSV/JSON). -->
+              <input id="shiftPlanFileInput" class="file-input-hidden" type="file"
+                     accept=".csv,text/csv" />
             </div>
-            <div class="shift-plan-controls">
-              <input id="shiftPlanSkuInput" class="shift-plan-input" list="shiftPlanSkuCatalog"
-                     placeholder="SKU из каталога или вручную" />
-              <input id="shiftPlanQtyInput" class="shift-plan-input shift-plan-qty" type="number" min="1"
-                     value="1" placeholder="Количество" />
-              <div id="btnShiftPlanAdd" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Добавить</span>
-              </div>
+            <div class="queue-main">
+              <div class="pack-meta">Текущий список на смену</div>
+              <div class="shift-plan-list" id="shiftPlanList"></div>
             </div>
-            <div class="shift-plan-catalog">
-              <input id="shiftPlanCatalogSearch" class="shift-plan-input"
-                     placeholder="Поиск в каталоге SKU" />
-              <div class="shift-plan-catalog-list" id="shiftPlanCatalogList"></div>
-            </div>
-            <div class="pill-row pill-row--start">
-              <div id="btnShiftPlanRemoveSelected" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Удалить выбранное</span>
-              </div>
-              <div id="btnShiftPlanMoveUp" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Вверх</span>
-              </div>
-              <div id="btnShiftPlanMoveDown" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Вниз</span>
-              </div>
-              <div id="btnShiftPlanUpload" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Редактировать список</span>
-              </div>
-              <!-- Импорт CSV доступен только мастеру и открывает системный выбор файла. -->
-              <div id="btnShiftPlanImport" class="pill-btn master-only master-only-hidden" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Загрузить сменное задание (CSV)</span>
-              </div>
-              <div id="btnShiftPlanSelect" class="pill-btn" role="button" tabindex="0">
-                <span class="dot"></span>
-                <span>Выбрать из списка</span>
-              </div>
-            </div>
-            <input id="shiftPlanImportFile" class="file-input-hidden" type="file" accept=".csv" />
-            <div class="pack-meta">Текущий список на смену</div>
-            <div class="shift-plan-list" id="shiftPlanList"></div>
             <datalist id="shiftPlanSkuCatalog"></datalist>
           </div>
+        </div>
         </div>
       </div>
     </div>
 
     <!-- Экран управления: смены, мастер и настройки. -->
-    <div class="screen" id="screenManagement" data-active="false">
-      <div class="container screen-content screen-content--compact">
-        <div class="panel panel--settings" id="settingsCard">
+    <div class="screen screen--master" id="tab-admin" data-active="false">
+      <div class="container screen-content screen-content--admin">
+        <div class="panel panel--settings panel--fullwidth" id="settingsCard">
           <div class="panel-header">
             <div class="panel-title">Управление / Настройки</div>
           </div>
@@ -1490,25 +1511,35 @@
             <!-- Группируем настройки по смыслу, чтобы оператор читал сверху вниз. -->
             <div class="settings-section">
               <div class="settings-section-title">Права оператора</div>
-              <div class="settings-row">
-                <input id="settingCanReorder" type="checkbox" />
-                <label for="settingCanReorder">Оператор может менять порядок очереди</label>
-              </div>
-              <div class="settings-row">
-                <input id="settingCanEditQty" type="checkbox" />
-                <label for="settingCanEditQty">Оператор может менять количество SKU</label>
-              </div>
-              <div class="settings-row">
-                <input id="settingCanAddSku" type="checkbox" />
-                <label for="settingCanAddSku">Оператор может добавлять SKU в смену</label>
-              </div>
-              <div class="settings-row">
-                <input id="settingCanRemoveSku" type="checkbox" />
-                <label for="settingCanRemoveSku">Оператор может удалять SKU из смены</label>
-              </div>
-              <div class="settings-row">
-                <input id="settingCanManualMode" type="checkbox" />
-                <label for="settingCanManualMode">Оператор может включать ручной режим</label>
+              <div class="settings-grid">
+                <div class="settings-row">
+                  <input id="allowReorderQueue" type="checkbox" />
+                  <label for="allowReorderQueue">Разрешить менять порядок очереди</label>
+                </div>
+                <div class="settings-row">
+                  <input id="allowChangeQty" type="checkbox" />
+                  <label for="allowChangeQty">Разрешить менять количество SKU</label>
+                </div>
+                <div class="settings-row">
+                  <input id="allowRemoveSku" type="checkbox" />
+                  <label for="allowRemoveSku">Разрешить удалять SKU из очереди</label>
+                </div>
+                <div class="settings-row">
+                  <input id="allowAddFromCatalog" type="checkbox" />
+                  <label for="allowAddFromCatalog">Разрешить добавлять SKU из каталога</label>
+                </div>
+                <div class="settings-row">
+                  <input id="allowManualMode" type="checkbox" />
+                  <label for="allowManualMode">Разрешить ручной режим</label>
+                </div>
+                <div class="settings-row">
+                  <input id="allowShiftPlanImport" type="checkbox" />
+                  <label for="allowShiftPlanImport">Разрешить оператору импорт сменного задания (CSV) с флешки</label>
+                </div>
+                <div class="settings-row">
+                  <input id="allowSkipSku" type="checkbox" />
+                  <label for="allowSkipSku">Разрешить пропуск SKU (в конец очереди)</label>
+                </div>
               </div>
             </div>
             <div class="settings-section">
@@ -1537,7 +1568,7 @@
         </div>
 
         <!-- Каталог SKU: базовый справочник, доступный только мастеру. -->
-        <div class="panel" id="skuCatalogPanel">
+        <div class="panel panel--fullwidth" id="skuCatalogPanel">
           <div class="panel-header">
             <div class="panel-title">Каталог SKU</div>
           </div>
@@ -1549,7 +1580,7 @@
                 <span>Добавить SKU</span>
               </div>
             </div>
-            <div class="sku-catalog-list" id="skuCatalogList">
+            <div class="sku-catalog-grid" id="skuCatalogList">
               <!-- Записи заполняются через JS, чтобы не дублировать логику в HTML. -->
             </div>
           </div>
@@ -1558,7 +1589,7 @@
     </div>
 
     <!-- Экран статистики: события и показатели. -->
-    <div class="screen" id="screenStats" data-active="false">
+    <div class="screen" id="tab-stats" data-active="false">
       <div class="container screen-content screen-content--compact screen-content--stats">
         <!-- Здесь только общая статистика: без "текущей кровати" и списка событий. -->
         <div class="panel">
@@ -1604,14 +1635,40 @@
               Отчёты обновляются автоматически при поступлении данных.
             </div>
           </div>
-          <div class="steps-list" id="stepsList"></div>
         </div>
       </div>
     </div>
 
     <!-- Экран отчётов: доступен только мастеру, чтобы не мешать оператору. -->
-    <div class="screen" id="screenReports" data-active="false">
+    <div class="screen screen--master" id="tab-reports" data-active="false">
       <div class="container screen-content screen-content--compact">
+        <div class="panel" id="reportsStubPanel">
+          <div class="panel-header">
+            <div class="panel-title">Отчёты (CSV)</div>
+          </div>
+          <div class="panel-body">
+            <div class="reports-stub">
+              <div class="settings-hint">Отчёты будут здесь: пока отдаем минимальные CSV.</div>
+              <div class="reports-stub-controls">
+                <div class="reports-field">
+                  <label class="settings-label" for="reportDateCsv">Дата отчёта</label>
+                  <input id="reportDateCsv" class="settings-input" type="date" />
+                </div>
+                <div class="reports-stub-actions">
+                  <div id="btnReportShiftCsv" class="pill-btn" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Отчет по смене (CSV)</span>
+                  </div>
+                  <div id="btnReportWorkersCsv" class="pill-btn" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Отчет по сотрудникам (CSV)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="panel" id="reportsParamsPanel">
           <div class="panel-header">
             <div class="panel-title">Параметры</div>
@@ -1653,6 +1710,7 @@
               <div class="settings-hint">Выберите параметры и нажмите «Обновить предпросмотр».</div>
             </div>
           </div>
+          <div class="steps-list" id="stepsList"></div>
         </div>
 
         <div class="panel" id="reportsExportPanel">
@@ -1768,13 +1826,13 @@
   </div>
 </div>
 
-<!-- Модалка выбора сменного задания -->
+<!-- Модалка выбора SKU из каталога -->
 <div id="shiftPlanSelectBackdrop" class="modal-backdrop" aria-hidden="true">
   <div class="modal" role="dialog" aria-modal="true">
     <div class="modal-content">
       <div>
-        <div class="modal-title">Выбор сменного задания</div>
-        <div class="modal-sub">Выберите один из ранее загруженных списков SKU.</div>
+        <div class="modal-title">Выбор SKU из каталога</div>
+        <div class="modal-sub">Выберите позицию, чтобы быстро добавить её в очередь.</div>
       </div>
       <div class="modal-actions" id="shiftPlanSelectActions"></div>
       <div class="modal-actions modal-actions--footer">
@@ -1853,6 +1911,7 @@
         </div>
       </div>
       <div class="modal-actions" id="skuCatalogModalActions"></div>
+      <div id="skuCatalogModalError" class="settings-hint settings-hint--danger" role="alert"></div>
       <div class="modal-actions modal-actions--footer">
         <div id="skuCatalogModalCancel" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
           <span class="dot"></span>
@@ -1867,6 +1926,7 @@
   const API_STATE_URL = "/api/kiosk/state";
   const API_PACK_UI_STATE_URL = "/api/kiosk/pack/ui-state";
   const API_PACK_STEPS_STATE_URL = "/api/kiosk/pack/steps/state";
+  const API_QUEUE_URL = "/api/kiosk/queue";
   const SHIFT_PLAN_STORAGE_KEY = "kz_shift_plans";
   const SHIFT_PLAN_ACTIVE_KEY = "kz_shift_plan_active";
 
@@ -1897,22 +1957,172 @@
   let shiftPlanSelectedSku = null;
   let manualModeEnabled = false;
   let shiftPlanCatalogFilter = "";
+  let shiftPlanUserActive = false;
+  let shiftPlanUserActiveTimer = null;
+  let shiftPlanPanelSignature = "";
+  let lastRenderedPlanHash = "";
 
   // Настройки прав оператора приходят из backend.
   // Здесь держим их как единый объект, чтобы функции могли опираться на них.
   const operatorSettings = {
-    operator_can_reorder: true,
-    operator_can_edit_qty: true,
+    allow_reorder_queue: true,
+    allow_change_qty: true,
+    allow_remove_sku: true,
+    allow_add_from_catalog: true,
+    allow_manual_mode: true,
+    allow_shift_plan_import: false,
+    allow_skip_sku: true,
   };
 
-  // Учебный каталог SKU: пока это локальный список,
-  // который можно заменить на API без изменения UI-логики.
-  const SHIFT_PLAN_SKU_CATALOG = [
-    "SKU-1",
-    "SKU-2",
-    "SKU-3",
-    "SKU-DEFAULT",
-  ];
+  // Учительская установка: быстрых SKU должно быть немного, чтобы оператор не терялся.
+  const SHIFT_PLAN_QUICK_LIMIT = 6;
+  // Учительская подсказка: каталог загружается через kiosk.js, а мы лишь перерисовываем UI.
+  window.onSkuCatalogLoaded = () => {
+    initShiftPlanCatalog();
+    renderShiftPlanList(shiftPlanSelected ? shiftPlanSelected.items : []);
+    renderPackPlanPreview();
+  };
+
+  function saveScrollPositions() {
+    /**
+     * Учительская подсказка: сохраняем скролл контейнеров очереди,
+     * чтобы автообновление не "прыгало" при перерисовке DOM.
+     */
+    const targets = [
+      document.getElementById("shiftPlanList"),
+      document.getElementById("shiftPlanCatalogList"),
+      document.getElementById("shiftPlanCard"),
+    ].filter(Boolean);
+    const map = {};
+    targets.forEach((el) => {
+      if (!el.id) return;
+      map[el.id] = { top: el.scrollTop, left: el.scrollLeft };
+    });
+    return map;
+  }
+
+  function restoreScrollPositions(map) {
+    /**
+     * Учительская подсказка: возвращаем скролл ровно туда,
+     * где оператор остановился, чтобы UI не сбивал работу.
+     */
+    if (!map) return;
+    Object.keys(map).forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.scrollTop = map[id].top || 0;
+      el.scrollLeft = map[id].left || 0;
+    });
+  }
+
+  function getActiveElementInfo() {
+    /**
+     * Учительская подсказка: сохраняем фокус, если оператор вводит данные.
+     * Это предотвращает потерю курсора при автоперерисовке.
+     */
+    const active = document.activeElement;
+    const shiftPlanCard = document.getElementById("shiftPlanCard");
+    if (!active || !active.id || !shiftPlanCard || !shiftPlanCard.contains(active)) {
+      return null;
+    }
+    const info = { id: active.id };
+    if ("selectionStart" in active && "selectionEnd" in active) {
+      info.selectionStart = active.selectionStart;
+      info.selectionEnd = active.selectionEnd;
+    }
+    return info;
+  }
+
+  function restoreActiveElement(info) {
+    /**
+     * Учительская подсказка: возвращаем фокус и позицию курсора,
+     * чтобы оператор продолжил ввод без "скачков".
+     */
+    if (!info || !info.id) return;
+    const el = document.getElementById(info.id);
+    if (!el) return;
+    el.focus();
+    if ("selectionStart" in el && info.selectionStart !== undefined) {
+      el.selectionStart = info.selectionStart;
+      el.selectionEnd = info.selectionEnd;
+    }
+  }
+
+  function isShiftPlanTabActive() {
+    /**
+     * Учительская подсказка: проверяем, что вкладка "Очередь" активна,
+     * иначе не блокируем обновление интерфейса.
+     */
+    const tab = document.getElementById("tab-queue");
+    return tab && tab.getAttribute("data-active") === "true";
+  }
+
+  function markShiftPlanUserActive() {
+    /**
+     * Учительская подсказка: фиксируем активность пользователя
+     * и сбрасываем её через короткую паузу без действий.
+     */
+    shiftPlanUserActive = true;
+    if (shiftPlanUserActiveTimer) {
+      clearTimeout(shiftPlanUserActiveTimer);
+    }
+    shiftPlanUserActiveTimer = setTimeout(() => {
+      shiftPlanUserActive = false;
+    }, 1500);
+  }
+
+  function buildShiftPlanSignature() {
+    /**
+     * Учительская подсказка: собираем сигнатуру данных очереди,
+     * чтобы лишний раз не трогать DOM без реальных изменений.
+     */
+    const items = shiftPlanSelected?.items || [];
+    return JSON.stringify({
+      selectedId: shiftPlanSelected?.id || 0,
+      selectedName: shiftPlanSelected?.name || "",
+      selectedSku: shiftPlanSelectedSku || "",
+      items: items.map((item) => [normalizeShiftPlanSku(item.sku), item.qty]),
+      permissions: {
+        reorder: operatorSettings.allow_reorder_queue,
+        qty: operatorSettings.allow_change_qty,
+        remove: operatorSettings.allow_remove_sku,
+        add: operatorSettings.allow_add_from_catalog,
+        manual: operatorSettings.allow_manual_mode,
+        skip: operatorSettings.allow_skip_sku,
+      },
+    });
+  }
+
+  function normalizeShiftPlanSku(value) {
+    /**
+     * Учительская подсказка: приводим SKU к канону внутри очереди,
+     * чтобы различие разделителей не сбивало сравнение списков.
+     */
+    const text = (value || "").toString().trim();
+    const legacy = /^(MM\.Кровать\.\d{3}-\d{1,3})-([A-Za-z0-9]+)\.(\d{2})$/;
+    const match = text.match(legacy);
+    if (match) {
+      return `${match[1]}.${match[2]}.${match[3]}`;
+    }
+    return text;
+  }
+
+  function renderShiftPlanPanelAuto(options = {}) {
+    /**
+     * Учительская подсказка: автообновление очереди не должно
+     * сбивать прокрутку и фокус при активной работе пользователя.
+     */
+    const shouldDefer = isShiftPlanTabActive() && shiftPlanUserActive && !options.force;
+    if (shouldDefer) return;
+    const signature = buildShiftPlanSignature();
+    if (!options.force && signature === shiftPlanPanelSignature) return;
+    const scrollMap = saveScrollPositions();
+    const activeInfo = getActiveElementInfo();
+    renderShiftPlanPanel();
+    shiftPlanPanelSignature = signature;
+    restoreScrollPositions(scrollMap);
+    restoreActiveElement(activeInfo);
+  }
   let btnPackStart = null;
   let btnPackStepComplete = null;
   let btnPackPhaseNext = null;
@@ -2037,12 +2247,15 @@
     if (masterStatusEl) {
       masterStatusEl.textContent = masterId ? `Мастер: ${masterId}` : "Мастер: —";
     }
-    if (btnMasterLogout) {
-      btnMasterLogout.classList.toggle("master-hidden", !masterId);
+    if (typeof window.updateMasterActionButtons === "function") {
+      // Учительская подсказка: кнопки входа/выхода рендерим по текущему state.
+      window.updateMasterActionButtons(!!masterId);
     }
     if (window.syncMasterState) {
       window.syncMasterState(masterId);
     }
+    // Учительская подсказка: обновляем доступность кнопок очереди при смене режима.
+    updateShiftPlanControlsAvailability();
 
     // Кнопки смены (белая/зелёная)
     setActionPillActive(btnAddWorker, !!state.shift_active);
@@ -2224,6 +2437,9 @@ document.getElementById("bedDetails").textContent =
       if (!resp.ok) return;
       const data = await resp.json();
       data.client_timestamp = Date.now() / 1000;
+      // Учительская подсказка: перед обновлением UI бережно
+      // обновляем очередь, если это не мешает оператору.
+      renderShiftPlanPanelAuto();
       renderState(data);
     } catch (e) {
       console.warn("Ошибка получения состояния киоска:", e);
@@ -2295,7 +2511,7 @@ document.getElementById("bedDetails").textContent =
       shiftPlanList = [];
       shiftPlanSelected = null;
     }
-    renderShiftPlanPanel();
+    renderShiftPlanPanelAuto();
     renderPackPlanPreview();
   }
 
@@ -2414,6 +2630,25 @@ document.getElementById("bedDetails").textContent =
     });
   }
 
+  function getSkuCatalogItems() {
+    /**
+     * Учительская подсказка: читаем каталог SKU из window,
+     * чтобы очередь всегда работала с актуальными данными.
+     */
+    return Array.isArray(window.kzSkuCatalog) ? window.kzSkuCatalog : [];
+  }
+
+  function getSkuMeta(sku) {
+    /**
+     * Учительская подсказка: извлекаем название SKU,
+     * чтобы показывать оператору понятный текст.
+     */
+    if (typeof window.findSku === "function") {
+      return window.findSku(sku);
+    }
+    return null;
+  }
+
   function renderShiftPlanPanel() {
     /**
      * Обновляем карточку сменного задания.
@@ -2444,7 +2679,107 @@ document.getElementById("bedDetails").textContent =
     }
     renderShiftPlanList(shiftPlanSelected.items);
     updateShiftPlanControlsAvailability();
+    // Учительская подсказка: фиксируем актуальную сигнатуру,
+    // чтобы автообновление не дублировало рендер без изменений.
+    shiftPlanPanelSignature = buildShiftPlanSignature();
   }
+
+  function formatShiftPlanTimestamp(value) {
+    /**
+    * Учительская подсказка: переводим таймштамп в читаемый вид.
+    */
+    if (!value) return "—";
+    const date = new Date(value * 1000);
+    if (Number.isNaN(date.getTime())) return "—";
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    const hh = String(date.getHours()).padStart(2, "0");
+    const min = String(date.getMinutes()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+  }
+
+  function renderShiftPlanStatus(plan, unknownSkus) {
+    /**
+     * Учительская подсказка: отдельно показываем статус мастеру,
+     * чтобы он видел имя, количество и время загрузки.
+     */
+    if (shiftPlanStatusName) {
+      shiftPlanStatusName.textContent = plan ? `План: ${plan.plan_name}` : "План: —";
+    }
+    if (shiftPlanStatusCount) {
+      const count = plan?.items ? plan.items.length : 0;
+      shiftPlanStatusCount.textContent = plan ? `Позиции: ${count}` : "Позиции: —";
+    }
+    if (shiftPlanStatusCreated) {
+      shiftPlanStatusCreated.textContent = plan
+        ? `Загружен: ${formatShiftPlanTimestamp(plan.created_at)}`
+        : "Загружен: —";
+    }
+    if (shiftPlanUnknownWarning) {
+      const list = Array.isArray(unknownSkus) ? unknownSkus : [];
+      if (!list.length) {
+        shiftPlanUnknownWarning.style.display = "none";
+      } else {
+        const preview = list.slice(0, 6).join(", ");
+        const suffix = list.length > 6 ? "…" : "";
+        shiftPlanUnknownWarning.textContent =
+          `Не найдены в каталоге (${list.length}): ${preview}${suffix}. ` +
+          "Проверьте формат SKU: MM.Кровать.001-16.VelutaLux.07";
+        shiftPlanUnknownWarning.style.display = "block";
+      }
+    }
+  }
+
+  async function fetchShiftPlanFromBackend(options = {}) {
+    /**
+     * Учительская подсказка: читаем статус плана ТОЛЬКО для подсказок,
+     * не трогая ручной список (shiftPlanSelected) и localStorage.
+     */
+    try {
+      const resp = await fetch("/api/kiosk/shift_plan", { cache: "no-store" });
+      if (!resp.ok) return;
+      const data = await resp.json().catch(() => ({}));
+      const plan = data.plan || null;
+      const unknown = data.unknown_skus || [];
+      renderShiftPlanStatus(plan, unknown);
+      // Важно: не перетираем shiftPlanSelected и не сбрасываем выбор.
+    } catch (error) {
+      console.warn("Не удалось получить сменный план:", error);
+    }
+  }
+
+  // Делаем обновление доступным снаружи (из kiosk.js).
+  window.refreshShiftPlanFromBackend = fetchShiftPlanFromBackend;
+
+  window.applyImportedShiftPlanToLocal = async (data) => {
+    /**
+     * Учительская подсказка: применяем импорт только после успешного ответа,
+     * чтобы ручной список не перетирался фоновым polling.
+     */
+    const normalizedItems = Array.isArray(data?.normalized_items) ? data.normalized_items : [];
+    if (!normalizedItems.length) {
+      showPackToast("Импорт завершён, но список пуст.");
+      return;
+    }
+    const newPlan = {
+      id: Date.now(),
+      name: data?.plan_name || "Сменное задание",
+      items: normalizedItems.map((item) => ({
+        sku: item.sku_code,
+        qty: item.qty,
+      })),
+    };
+    shiftPlanList.unshift(newPlan);
+    shiftPlanSelected = newPlan;
+    shiftPlanSelectedSku = null;
+    // Учительская подсказка: сбрасываем хеш, чтобы новый план точно перерисовался.
+    lastRenderedPlanHash = "";
+    saveShiftPlansToStorage();
+    renderShiftPlanPanel();
+    renderShiftPlanList(shiftPlanSelected.items);
+    renderPackPlanPreview();
+  };
 
   function renderShiftPlanList(items) {
     /**
@@ -2453,6 +2788,18 @@ document.getElementById("bedDetails").textContent =
      */
     const listEl = document.getElementById("shiftPlanList");
     if (!listEl) return;
+    const hash = JSON.stringify(
+      (items || []).map((item) => [
+        normalizeShiftPlanSku(item.sku),
+        item.qty,
+        item.position,
+      ])
+    );
+    if (hash === lastRenderedPlanHash) {
+      return;
+    }
+    const scrollTop = listEl.scrollTop;
+    const selectedSku = shiftPlanSelectedSku;
     listEl.innerHTML = "";
 
     if (!items || !items.length) {
@@ -2466,28 +2813,41 @@ document.getElementById("bedDetails").textContent =
     items.forEach((item) => {
       const row = document.createElement("div");
       row.className = "shift-plan-row";
+      row.dataset.sku = normalizeShiftPlanSku(item.sku);
       if (shiftPlanSelectedSku === item.sku) {
         row.classList.add("selected");
       }
 
       const skuEl = document.createElement("div");
-      skuEl.textContent = item.sku;
+      skuEl.className = "shift-plan-sku";
+      const skuCodeEl = document.createElement("div");
+      skuCodeEl.className = "shift-plan-sku-code";
+      skuCodeEl.textContent = normalizeShiftPlanSku(item.sku);
+      const skuMeta = getSkuMeta(item.sku);
+      if (skuMeta && skuMeta.name) {
+        const skuNameEl = document.createElement("div");
+        skuNameEl.className = "shift-plan-sku-name";
+        skuNameEl.textContent = skuMeta.name;
+        skuEl.appendChild(skuNameEl);
+      }
+      skuEl.prepend(skuCodeEl);
       skuEl.addEventListener("click", () => {
         shiftPlanSelectedSku = item.sku;
         renderShiftPlanList(items);
       });
 
       const qtyEl = document.createElement("div");
-      qtyEl.textContent = `×${item.qty}`;
+      qtyEl.className = "shift-plan-qty";
+      qtyEl.textContent = buildShiftPlanQtyLabel(item);
 
       const minusBtn = document.createElement("div");
       minusBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
       minusBtn.textContent = "−";
-      if (!operatorSettings.operator_can_edit_qty) {
+      if (!operatorSettings.allow_change_qty) {
         minusBtn.classList.add("pill-btn--disabled");
       }
       minusBtn.addEventListener("click", () => {
-        if (!operatorSettings.operator_can_edit_qty) {
+        if (!operatorSettings.allow_change_qty) {
           showPackToast("Изменение количества отключено настройками мастера.");
           return;
         }
@@ -2497,11 +2857,11 @@ document.getElementById("bedDetails").textContent =
       const plusBtn = document.createElement("div");
       plusBtn.className = "pill-btn pill-btn--ghost pill-btn--mini";
       plusBtn.textContent = "+";
-      if (!operatorSettings.operator_can_edit_qty) {
+      if (!operatorSettings.allow_change_qty) {
         plusBtn.classList.add("pill-btn--disabled");
       }
       plusBtn.addEventListener("click", () => {
-        if (!operatorSettings.operator_can_edit_qty) {
+        if (!operatorSettings.allow_change_qty) {
           showPackToast("Изменение количества отключено настройками мастера.");
           return;
         }
@@ -2511,12 +2871,21 @@ document.getElementById("bedDetails").textContent =
       const deleteBtn = document.createElement("div");
       deleteBtn.className = "pill-btn pill-btn--danger pill-btn--mini";
       deleteBtn.textContent = "Удалить";
-      deleteBtn.addEventListener("click", () => removeSkuFromShiftPlan(item.sku));
+      if (!operatorSettings.allow_remove_sku) {
+        deleteBtn.classList.add("pill-btn--disabled");
+      }
+      deleteBtn.addEventListener("click", () => {
+        if (!operatorSettings.allow_remove_sku) {
+          showPackToast("Удаление SKU отключено настройками мастера.");
+          return;
+        }
+        removeSkuFromShiftPlan(item.sku);
+      });
 
       const runBtn = document.createElement("div");
       runBtn.className = "pill-btn pill-btn--primary pill-btn--mini";
       runBtn.textContent = "Запустить";
-      if (!manualModeEnabled) {
+      if (!manualModeEnabled || !operatorSettings.allow_manual_mode) {
         runBtn.classList.add("pill-btn--disabled");
       } else {
         runBtn.addEventListener("click", () => startSkuFromPlan(item.sku));
@@ -2532,6 +2901,47 @@ document.getElementById("bedDetails").textContent =
     });
 
     updateShiftPlanControlsAvailability();
+    lastRenderedPlanHash = hash;
+    if (selectedSku && items.some((item) => item.sku === selectedSku)) {
+      shiftPlanSelectedSku = selectedSku;
+    }
+    listEl.scrollTop = scrollTop;
+  }
+
+  function buildShiftPlanQtyLabel(item) {
+    /**
+     * Учительская подсказка: формируем короткую подпись для количества,
+     * чтобы оператор видел и план, и прогресс без отдельной верстки.
+     */
+    const qty = item?.qty ?? 0;
+    const remaining = item?.remaining_qty;
+    if (remaining === undefined || remaining === null) {
+      return `×${qty}`;
+    }
+    return `×${qty} • осталось ${remaining}`;
+  }
+
+  function updateShiftPlanProgress(items) {
+    /**
+     * Учительская подсказка: обновляем только числа прогресса,
+     * не пересоздавая весь список и не сбивая фокус/скролл.
+     */
+    const listEl = document.getElementById("shiftPlanList");
+    if (!listEl) return;
+    const map = new Map();
+    (items || []).forEach((item) => {
+      map.set(normalizeShiftPlanSku(item.sku), buildShiftPlanQtyLabel(item));
+    });
+    listEl.querySelectorAll(".shift-plan-row").forEach((row) => {
+      const sku = row.dataset.sku || "";
+      if (!map.has(sku)) return;
+      const qtyEl = row.querySelector(".shift-plan-qty");
+      if (!qtyEl) return;
+      const nextText = map.get(sku);
+      if (qtyEl.textContent !== nextText) {
+        qtyEl.textContent = nextText;
+      }
+    });
   }
 
   function applyOperatorSettings(settings) {
@@ -2542,11 +2952,26 @@ document.getElementById("bedDetails").textContent =
      * - kiosk.js получает настройки и передаёт их сюда;
      * - UI обновляется централизованно и без дублей логики.
      */
-    if (typeof settings?.operator_can_reorder === "boolean") {
-      operatorSettings.operator_can_reorder = settings.operator_can_reorder;
+    if (typeof settings?.allow_reorder_queue === "boolean") {
+      operatorSettings.allow_reorder_queue = settings.allow_reorder_queue;
     }
-    if (typeof settings?.operator_can_edit_qty === "boolean") {
-      operatorSettings.operator_can_edit_qty = settings.operator_can_edit_qty;
+    if (typeof settings?.allow_change_qty === "boolean") {
+      operatorSettings.allow_change_qty = settings.allow_change_qty;
+    }
+    if (typeof settings?.allow_remove_sku === "boolean") {
+      operatorSettings.allow_remove_sku = settings.allow_remove_sku;
+    }
+    if (typeof settings?.allow_add_from_catalog === "boolean") {
+      operatorSettings.allow_add_from_catalog = settings.allow_add_from_catalog;
+    }
+    if (typeof settings?.allow_manual_mode === "boolean") {
+      operatorSettings.allow_manual_mode = settings.allow_manual_mode;
+    }
+    if (typeof settings?.allow_shift_plan_import === "boolean") {
+      operatorSettings.allow_shift_plan_import = settings.allow_shift_plan_import;
+    }
+    if (typeof settings?.allow_skip_sku === "boolean") {
+      operatorSettings.allow_skip_sku = settings.allow_skip_sku;
     }
     if (shiftPlanSelected) {
       renderShiftPlanList(shiftPlanSelected.items);
@@ -2563,12 +2988,38 @@ document.getElementById("bedDetails").textContent =
      * - плюс/минус обновляются в renderShiftPlanList.
      */
     const hasSelection = !!shiftPlanSelectedSku;
-    const reorderAllowed = operatorSettings.operator_can_reorder && hasSelection;
+    const reorderAllowed = operatorSettings.allow_reorder_queue && hasSelection;
     if (btnShiftPlanMoveUp) {
       setActionPillDisabled(btnShiftPlanMoveUp, !reorderAllowed);
     }
     if (btnShiftPlanMoveDown) {
       setActionPillDisabled(btnShiftPlanMoveDown, !reorderAllowed);
+    }
+    if (btnShiftPlanSkip) {
+      setActionPillDisabled(btnShiftPlanSkip, !operatorSettings.allow_skip_sku || !hasSelection);
+    }
+    if (btnShiftPlanRemoveSelected) {
+      setActionPillDisabled(
+        btnShiftPlanRemoveSelected,
+        !operatorSettings.allow_remove_sku || !hasSelection
+      );
+    }
+    if (btnShiftPlanAdd) {
+      setActionPillDisabled(btnShiftPlanAdd, !operatorSettings.allow_add_from_catalog);
+    }
+    if (shiftPlanSkuInput) {
+      shiftPlanSkuInput.disabled = !operatorSettings.allow_add_from_catalog;
+    }
+    if (shiftPlanQtyInput) {
+      shiftPlanQtyInput.disabled = !operatorSettings.allow_add_from_catalog;
+    }
+    if (btnShiftPlanImport) {
+      const isMasterActive = document.body.classList.contains("is-master-active");
+      const importAllowed = isMasterActive || operatorSettings.allow_shift_plan_import;
+      btnShiftPlanImport.classList.toggle("shift-plan-import-hidden", !importAllowed);
+      if (shiftPlanImportHint) {
+        shiftPlanImportHint.style.display = "none";
+      }
     }
   }
 
@@ -2590,31 +3041,37 @@ document.getElementById("bedDetails").textContent =
     listEl.innerHTML = "";
 
     const filter = (shiftPlanCatalogFilter || "").toLowerCase();
-    const visibleItems = SHIFT_PLAN_SKU_CATALOG.filter((sku) => {
-      return !filter || sku.toLowerCase().includes(filter);
-    });
+    const catalog = getSkuCatalogItems().filter((item) => item.is_active !== false);
+    const visibleItems = filter
+      ? (typeof window.filterSku === "function" ? window.filterSku(filter) : catalog)
+      : catalog.slice(0, SHIFT_PLAN_QUICK_LIMIT);
 
     if (!visibleItems.length) {
       const empty = document.createElement("div");
       empty.className = "pack-meta";
-      empty.textContent = "Совпадений не найдено.";
+      empty.textContent = filter ? "Совпадений не найдено." : "Каталог пуст.";
       listEl.appendChild(empty);
       return;
     }
 
-    visibleItems.forEach((sku) => {
-      const item = document.createElement("div");
-      item.className = "pill-btn pill-btn--ghost pill-btn--mini";
-      item.textContent = sku;
-      item.addEventListener("click", () => {
+    visibleItems.forEach((skuItem) => {
+      const chip = document.createElement("div");
+      chip.className = "pill-btn pill-btn--ghost pill-btn--mini shift-plan-chip";
+      const code = skuItem.sku_code || "";
+      const name = skuItem.name || "";
+      chip.innerHTML = `
+        <span class="shift-plan-chip-code">${code}</span>
+        ${name ? `<span class="shift-plan-chip-name">${name}</span>` : ""}
+      `;
+      chip.addEventListener("click", () => {
         if (shiftPlanSkuInput) {
-          shiftPlanSkuInput.value = sku;
+          shiftPlanSkuInput.value = code;
           if (shiftPlanQtyInput) {
             shiftPlanQtyInput.focus();
           }
         }
       });
-      listEl.appendChild(item);
+      listEl.appendChild(chip);
     });
   }
 
@@ -2684,6 +3141,10 @@ document.getElementById("bedDetails").textContent =
      * Добавляем SKU в активный план.
      * Если план ещё не выбран — создаём новый, чтобы оператор мог работать сразу.
      */
+    if (!operatorSettings.allow_add_from_catalog) {
+      showPackToast("Добавление SKU отключено настройками мастера.");
+      return;
+    }
     const sku = (shiftPlanSkuInput.value || "").trim();
     const qty = Math.max(1, parseInt(shiftPlanQtyInput.value || "1", 10));
     if (!sku) {
@@ -2724,6 +3185,10 @@ document.getElementById("bedDetails").textContent =
       showPackToast("Выберите строку в списке, чтобы удалить.");
       return;
     }
+    if (!operatorSettings.allow_remove_sku) {
+      showPackToast("Удаление SKU отключено настройками мастера.");
+      return;
+    }
     shiftPlanSelected.items = shiftPlanSelected.items.filter((item) => item.sku !== shiftPlanSelectedSku);
     shiftPlanSelectedSku = null;
     saveShiftPlansToStorage();
@@ -2739,7 +3204,7 @@ document.getElementById("bedDetails").textContent =
      * - оператор может оперативно поменять приоритеты;
      * - движение строго на одну позицию, чтобы избежать ошибок.
      */
-    if (!operatorSettings.operator_can_reorder) {
+    if (!operatorSettings.allow_reorder_queue) {
       showPackToast("Изменение порядка отключено настройками мастера.");
       return;
     }
@@ -2764,15 +3229,17 @@ document.getElementById("bedDetails").textContent =
 
   function initShiftPlanCatalog() {
     /**
-     * Заполняем выпадающий список SKU локальным каталогом.
-     * Это временная мера: позже каталог можно заменить на API без смены UI.
+     * Заполняем выпадающий список SKU из каталога backend.
+     * Так оператор всегда видит актуальные позиции.
      */
     const dataList = document.getElementById("shiftPlanSkuCatalog");
     if (!dataList) return;
     dataList.innerHTML = "";
-    SHIFT_PLAN_SKU_CATALOG.forEach((sku) => {
+    getSkuCatalogItems()
+      .filter((item) => item.is_active !== false)
+      .forEach((item) => {
       const option = document.createElement("option");
-      option.value = sku;
+      option.value = item.sku_code || "";
       dataList.appendChild(option);
     });
     renderShiftPlanCatalog();
@@ -2793,21 +3260,31 @@ document.getElementById("bedDetails").textContent =
 
   function renderShiftPlanSelectActions() {
     /**
-     * Формируем список доступных планов в виде кнопок.
-     * Это позволяет выбрать план быстро, без дополнительных форм ввода.
+     * Формируем список SKU из каталога.
+     * Это позволяет выбрать SKU быстро, без ручного ввода.
      */
     shiftPlanSelectActions.innerHTML = "";
 
-    if (!shiftPlanList.length) {
-      shiftPlanSelectActions.appendChild(mkModalBtn("Планы не найдены", "primary", () => {}));
+    const catalog = getSkuCatalogItems().filter((item) => item.is_active !== false);
+    const list = typeof window.filterSku === "function"
+      ? window.filterSku(shiftPlanCatalogFilter)
+      : catalog;
+
+    if (!list.length) {
+      shiftPlanSelectActions.appendChild(mkModalBtn("Каталог пуст", "primary", () => {}));
       return;
     }
 
-    shiftPlanList.forEach((plan) => {
-      const totalCount = plan.items.reduce((sum, item) => sum + item.qty, 0);
+    list.forEach((item) => {
+      const label = item.name ? `${item.sku_code} — ${item.name}` : item.sku_code;
       shiftPlanSelectActions.appendChild(
-        mkModalBtn(`${plan.name} (${totalCount} SKU)`, "success", async () => {
-          selectShiftPlan(plan.id);
+        mkModalBtn(label, "success", async () => {
+          if (shiftPlanSkuInput) {
+            shiftPlanSkuInput.value = item.sku_code || "";
+            if (shiftPlanQtyInput) {
+              shiftPlanQtyInput.focus();
+            }
+          }
           closeShiftPlanSelectModal();
         })
       );
@@ -3112,10 +3589,10 @@ document.getElementById("bedDetails").textContent =
 
   function openShiftPlanSelectModal() {
     /**
-     * Модалка выбора сменного задания из списка.
+     * Модалка выбора SKU из каталога.
      *
-     * Мы выводим доступные планы как набор кнопок,
-     * чтобы выбор занимал 1–2 клика и не требовал ввода.
+     * Мы выводим позиции как набор кнопок,
+     * чтобы оператор не вводил код вручную.
      */
     shiftPlanSelectOpen = true;
     shiftPlanSelectBackdrop.classList.add("open");
@@ -3274,13 +3751,23 @@ function mkModalBtn(text, kind, onClick) {
   const btnShiftPlanRemoveSelected = document.getElementById("btnShiftPlanRemoveSelected");
   const btnShiftPlanMoveUp = document.getElementById("btnShiftPlanMoveUp");
   const btnShiftPlanMoveDown = document.getElementById("btnShiftPlanMoveDown");
+  const btnShiftPlanSkip = document.getElementById("btnShiftPlanSkip");
   const btnShiftPlanImport = document.getElementById("btnShiftPlanImport");
   const shiftPlanImportFile = document.getElementById("shiftPlanImportFile");
+  const btnShiftPlanUploadMaster = document.getElementById("btnShiftPlanUploadMaster");
+  const btnShiftPlanClearMaster = document.getElementById("btnShiftPlanClearMaster");
+  const shiftPlanFileInput = document.getElementById("shiftPlanFileInput");
+  const shiftPlanStatusName = document.getElementById("shiftPlanStatusName");
+  const shiftPlanStatusCount = document.getElementById("shiftPlanStatusCount");
+  const shiftPlanStatusCreated = document.getElementById("shiftPlanStatusCreated");
+  const shiftPlanUnknownWarning = document.getElementById("shiftPlanUnknownWarning");
+  const shiftPlanImportHint = document.getElementById("shiftPlanImportHint");
   const shiftPlanSkuInput = document.getElementById("shiftPlanSkuInput");
   const shiftPlanQtyInput = document.getElementById("shiftPlanQtyInput");
   const shiftPlanRenameInput = document.getElementById("shiftPlanRenameInput");
   const btnShiftPlanRename = document.getElementById("btnShiftPlanRename");
   const shiftPlanCatalogSearch = document.getElementById("shiftPlanCatalogSearch");
+  const shiftPlanCard = document.getElementById("shiftPlanCard");
 
   if (btnPackStart) {
     btnPackStart.addEventListener("click", () => {
@@ -3319,48 +3806,41 @@ function mkModalBtn(text, kind, onClick) {
     });
   }
 
-  async function importShiftPlanCsv(file) {
+  async function syncQueueFromBackend() {
     /**
-     * Импортируем сменное задание из CSV через backend.
+     * Учительская подсказка: оставляем синхронизацию статуса,
+     * но не трогаем ручной список оператора.
+     */
+    try {
+      await fetchShiftPlanFromBackend({ force: true });
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // Делаем синхронизацию доступной для kiosk.js.
+  window.syncQueueFromBackend = syncQueueFromBackend;
+
+  async function triggerShiftPlanImport(file) {
+    /**
+     * Передаём файл в kiosk.js, где живёт логика импорта.
      *
-     * Backend проверит права мастера и валидность SKU,
-     * поэтому здесь только отправляем файл и показываем результат.
+     * Это удерживает сетевую логику в одном месте и упрощает поддержку.
      */
     if (!file) return;
-    const formData = new FormData();
-    formData.append("file", file);
-    try {
-      const resp = await fetch("/api/kiosk/shift_plan/import", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.status === "error") {
-        const errors = (data.errors || []).slice(0, 3);
-        const errorText = errors.length
-          ? errors.map((e) => `${e.sku || "—"}: ${e.error || e}`).join("; ")
-          : (data.detail || "Импорт не выполнен.");
-        showPackToast(`Импорт отменён. Ошибки: ${errorText}`);
-        return;
-      }
-
-      const items = data.added_items || [];
-      const planName = "Импорт CSV";
-      const newPlan = {
-        id: Date.now(),
-        name: planName,
-        items,
-      };
-      shiftPlanList.unshift(newPlan);
-      shiftPlanSelected = newPlan;
-      shiftPlanSelectedSku = null;
-      saveShiftPlansToStorage();
-      renderShiftPlanPanel();
-      renderPackPlanPreview();
-      showPackToast(`Импорт завершён: ${items.length} SKU, пропущено ${data.skipped || 0}.`);
-    } catch (error) {
-      showPackToast("Ошибка сети: CSV не импортирован.");
+    window.showPackToast?.(`Файл выбран: ${file.name}. Начинаю импорт...`);
+    const isMasterActive = document.body.classList.contains("is-master-active");
+    if (!isMasterActive && !operatorSettings.allow_shift_plan_import) {
+      showPackToast("Импорт запрещен настройками мастера.");
+      return;
     }
+    if (typeof window.importShiftPlanFile !== "function") {
+      showPackToast("Импорт временно недоступен.");
+      return;
+    }
+    console.log("Импорт сменного задания: отправляем файл на backend.");
+    await window.importShiftPlanFile(file);
   }
 
   if (btnManualToggle && manualControls) {
@@ -3370,6 +3850,10 @@ function mkModalBtn(text, kind, onClick) {
        * чтобы не провоцировать оператора на ручные действия.
        * Супервайзер осознанно раскрывает этот блок при необходимости.
        */
+      if (!operatorSettings.allow_manual_mode) {
+        showPackToast("Ручной режим отключён настройками мастера.");
+        return;
+      }
       manualControls.classList.toggle("open");
       manualModeEnabled = manualControls.classList.contains("open");
       if (shiftPlanSelected) {
@@ -3381,19 +3865,82 @@ function mkModalBtn(text, kind, onClick) {
   if (btnShiftPlanUpload) {
     btnShiftPlanUpload.addEventListener("click", () => openShiftPlanUploadModal());
   }
-  if (btnShiftPlanImport && shiftPlanImportFile) {
+  if (btnShiftPlanImport && shiftPlanImportFile && !btnShiftPlanImport.dataset.bound) {
+    btnShiftPlanImport.dataset.bound = "1";
     btnShiftPlanImport.addEventListener("click", () => {
       /**
        * Открываем системный выбор файла.
        *
        * Так мы остаёмся внутри киоска и не уводим пользователя в файловый менеджер.
        */
+      if (btnShiftPlanImport.classList.contains("pill-btn--disabled")) {
+        showPackToast("Импорт доступен только мастеру или при разрешении в настройках.");
+        return;
+      }
       shiftPlanImportFile.click();
     });
-    shiftPlanImportFile.addEventListener("change", () => {
-      const file = shiftPlanImportFile.files && shiftPlanImportFile.files[0];
-      importShiftPlanCsv(file);
-      shiftPlanImportFile.value = "";
+    if (!shiftPlanImportFile.dataset.bound) {
+      shiftPlanImportFile.dataset.bound = "1";
+      shiftPlanImportFile.addEventListener("change", async () => {
+        const file = shiftPlanImportFile.files && shiftPlanImportFile.files[0];
+        shiftPlanImportFile.value = "";
+        if (!file) return;
+        try {
+          await triggerShiftPlanImport(file);
+        } catch (error) {
+          showPackToast(`Ошибка импорта: ${error}`);
+        }
+      });
+    }
+  }
+  if (btnShiftPlanUploadMaster && shiftPlanFileInput && !btnShiftPlanUploadMaster.dataset.bound) {
+    btnShiftPlanUploadMaster.dataset.bound = "1";
+    btnShiftPlanUploadMaster.addEventListener("click", () => {
+      /**
+       * Учительская подсказка: выбор файла запускаем через скрытый input,
+       * чтобы интерфейс оставался «киосковым» и предсказуемым.
+       */
+      if (btnShiftPlanUploadMaster.classList.contains("pill-btn--disabled")) {
+        showPackToast("Импорт доступен только мастеру или при разрешении в настройках.");
+        return;
+      }
+      shiftPlanFileInput.click();
+    });
+    if (!shiftPlanFileInput.dataset.bound) {
+      shiftPlanFileInput.dataset.bound = "1";
+      shiftPlanFileInput.addEventListener("change", async () => {
+        const file = shiftPlanFileInput.files && shiftPlanFileInput.files[0];
+        shiftPlanFileInput.value = "";
+        if (!file) return;
+        try {
+          await triggerShiftPlanImport(file);
+        } catch (error) {
+          showPackToast(`Ошибка импорта: ${error}`);
+        }
+      });
+    }
+  }
+  if (btnShiftPlanClearMaster) {
+    btnShiftPlanClearMaster.addEventListener("click", async () => {
+      /**
+       * Учительская подсказка: очищаем план через backend,
+       * чтобы оператор сразу увидел пустой список.
+       */
+      try {
+        const resp = await fetch("/api/kiosk/shift_plan/clear", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        if (!resp.ok) {
+          const detail = await resp.json().catch(() => ({}));
+          showPackToast(detail.detail || "Не удалось очистить план.");
+          return;
+        }
+        showPackToast("Сменный план очищен.");
+        await fetchShiftPlanFromBackend({ force: true });
+      } catch (error) {
+        showPackToast("Ошибка сети: план не очищен.");
+      }
     });
   }
   if (btnShiftPlanSelect) {
@@ -3411,6 +3958,25 @@ function mkModalBtn(text, kind, onClick) {
   if (btnShiftPlanMoveDown) {
     btnShiftPlanMoveDown.addEventListener("click", () => moveSelectedSku(1));
   }
+  if (btnShiftPlanSkip) {
+    btnShiftPlanSkip.addEventListener("click", () => {
+      /**
+       * Пропуск SKU — это безопасное перемещение в конец списка.
+       * Мы не удаляем позицию, а просто меняем её приоритет.
+       */
+      if (!shiftPlanSelected || !shiftPlanSelectedSku) return;
+      if (!operatorSettings.allow_skip_sku) {
+        showPackToast("Пропуск SKU отключён настройками мастера.");
+        return;
+      }
+      const items = shiftPlanSelected.items;
+      const index = items.findIndex((item) => item.sku === shiftPlanSelectedSku);
+      if (index < 0) return;
+      const [item] = items.splice(index, 1);
+      items.push(item);
+      renderShiftPlanList(items);
+    });
+  }
   if (btnShiftPlanRename) {
     btnShiftPlanRename.addEventListener("click", () => renameShiftPlan());
   }
@@ -3424,6 +3990,20 @@ function mkModalBtn(text, kind, onClick) {
       renderShiftPlanCatalog();
     });
   }
+  if (shiftPlanCard) {
+    /**
+     * Учительская подсказка: любое действие внутри очереди
+     * временно блокирует автообновление, чтобы не сбивать скролл.
+     */
+    shiftPlanCard.addEventListener("pointerdown", markShiftPlanUserActive);
+    shiftPlanCard.addEventListener("keydown", markShiftPlanUserActive);
+    shiftPlanCard.addEventListener("input", markShiftPlanUserActive);
+    shiftPlanCard.addEventListener(
+      "wheel",
+      () => markShiftPlanUserActive(),
+      { passive: true }
+    );
+  }
 
   /**
    * Инициализация UI.
@@ -3436,11 +4016,13 @@ function mkModalBtn(text, kind, onClick) {
   warnAboutMergeMarkers();
   setInterval(fetchState, 1500);
   setInterval(refreshPackData, 2000);
+  setInterval(fetchShiftPlanFromBackend, 5000);
   setInterval(tickTimers, 1000);
   fetchState();
   refreshPackData();
   initShiftPlanCatalog();
   loadShiftPlansFromStorage();
+  fetchShiftPlanFromBackend();
 
   // helper для отладочной подписи внизу
   const scanDebug = document.createElement("div");

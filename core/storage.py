@@ -1,5 +1,6 @@
 import sqlite3
 import time
+import json
 from pathlib import Path
 
 DB = Path("storage/kz_pack.db")
@@ -137,6 +138,38 @@ def init_db():
         items_json TEXT NOT NULL
     )
     """)
+    # Учительская ремарка:
+    # добавляем флаг активности без жёстких миграций, чтобы старые базы не ломались.
+    cur.execute("PRAGMA table_info(shift_plans)")
+    shift_plan_columns = [row["name"] for row in cur.fetchall()]
+    if "is_active" not in shift_plan_columns:
+        cur.execute("ALTER TABLE shift_plans ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0")
+
+    # Таблица позиций сменного задания:
+    # храним каждую строку отдельно, чтобы UI мог сортировать по позиции.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS shift_plan_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id INTEGER NOT NULL,
+        sku_code TEXT NOT NULL,
+        qty INTEGER NOT NULL,
+        position INTEGER NOT NULL
+    )
+    """)
+
+    # Таблица прогресса сменного плана.
+    # Она фиксирует, сколько SKU уже выполнено по каждой строке.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS shift_plan_progress (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shift_id INTEGER NOT NULL,
+        plan_id INTEGER NOT NULL,
+        sku_code TEXT NOT NULL,
+        done_qty INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL,
+        UNIQUE(shift_id, plan_id, sku_code)
+    )
+    """)
 
     # Таблица настроек киоска.
     # Храним простые флаги (0/1), чтобы быстро управлять правами оператора.
@@ -180,6 +213,11 @@ def init_db():
         "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
         ["operator_can_manual_mode", 1],
     )
+    # Учительская ремарка: по умолчанию оператор НЕ может импортировать план с флешки.
+    cur.execute(
+        "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
+        ["allow_operator_shift_plan_import", 0],
+    )
     cur.execute(
         "INSERT OR IGNORE INTO kiosk_settings(key, value) VALUES (?, ?)",
         ["master_session_timeout_min", 15],
@@ -197,6 +235,20 @@ def init_db():
         fabric_code TEXT NOT NULL,
         color_code TEXT NOT NULL,
         is_active INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )
+    """)
+
+    # Таблица очереди (сменного задания) для упаковки.
+    # Мы храним по одной строке на SKU и обновляем количество,
+    # чтобы очередь была компактной и удобной для оператора.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS queue_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sku_code TEXT NOT NULL UNIQUE,
+        qty INTEGER NOT NULL,
+        position INTEGER NOT NULL,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
     )
@@ -364,6 +416,27 @@ def list_sku_catalog(search: str | None = None, include_inactive: bool = False) 
     return [dict(row) for row in (rows or [])]
 
 
+def get_sku_catalog_item_by_code(sku_code: str) -> dict | None:
+    """
+    Возвращает SKU по коду.
+
+    Учительская ремарка:
+    - sku_code — наш бизнес-ключ, поэтому поиск идёт именно по нему.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, sku_code, name, model_code, width_cm, fabric_code, color_code,
+                  is_active, created_at, updated_at
+           FROM sku_catalog
+           WHERE sku_code=?""",
+        [sku_code],
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def create_sku_catalog_item(
     sku_code: str,
     name: str,
@@ -438,6 +511,114 @@ def update_sku_catalog_item(
     conn.close()
 
 
+def update_sku_catalog_item_full(
+    sku_id: int,
+    sku_code: str,
+    name: str,
+    model_code: str,
+    width_cm: int,
+    fabric_code: str,
+    color_code: str,
+    is_active: int,
+) -> None:
+    """
+    Полностью обновляет SKU, включая код и параметры.
+
+    Учительская ремарка:
+    - это нужно для редактирования в UI;
+    - код должен оставаться каноническим.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE sku_catalog
+           SET sku_code=?, name=?, model_code=?, width_cm=?, fabric_code=?,
+               color_code=?, is_active=?, updated_at=?
+           WHERE id=?""",
+        [
+            sku_code,
+            name,
+            model_code,
+            int(width_cm),
+            fabric_code,
+            color_code,
+            int(is_active),
+            int(time.time()),
+            int(sku_id),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_sku_catalog_item_full_by_code(
+    current_sku_code: str,
+    new_sku_code: str,
+    name: str,
+    model_code: str,
+    width_cm: int,
+    fabric_code: str,
+    color_code: str,
+    is_active: int,
+) -> None:
+    """
+    Полностью обновляет SKU по его коду.
+
+    Учительская ремарка:
+    - этот путь нужен для upsert-логики без зависимости от id;
+    - код меняется явно через переданный sku_code.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE sku_catalog
+           SET sku_code=?, name=?, model_code=?, width_cm=?, fabric_code=?,
+               color_code=?, is_active=?, updated_at=?
+           WHERE sku_code=?""",
+        [
+            new_sku_code,
+            name,
+            model_code,
+            int(width_cm),
+            fabric_code,
+            color_code,
+            int(is_active),
+            int(time.time()),
+            current_sku_code,
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_sku_catalog_item(sku_id: int) -> None:
+    """
+    Удаляет SKU из каталога.
+
+    Учительская ремарка:
+    - удаление окончательное, поэтому делаем подтверждение в UI.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM sku_catalog WHERE id=?", [int(sku_id)])
+    conn.commit()
+    conn.close()
+
+
+def delete_sku_catalog_item_by_code(sku_code: str) -> None:
+    """
+    Удаляет SKU из каталога по коду.
+
+    Учительская ремарка:
+    - используем sku_code, потому что он виден оператору и уникален.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM sku_catalog WHERE sku_code=?", [sku_code])
+    conn.commit()
+    conn.close()
+
+
 def get_active_sku_codes() -> set[str]:
     """
     Возвращает множество активных SKU из каталога.
@@ -450,6 +631,29 @@ def get_active_sku_codes() -> set[str]:
     rows = cur.fetchall()
     conn.close()
     return {row["sku_code"] for row in (rows or [])}
+
+
+def get_sku_catalog_validation_data() -> tuple[set[str], bool]:
+    """
+    Возвращает активные SKU и флаг наличия каталога.
+
+    Это нужно для импорта CSV: если каталог пуст,
+    мы не блокируем новые SKU, а если каталог есть —
+    требуем только активные коды.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT sku_code, is_active FROM sku_catalog")
+    rows = cur.fetchall() or []
+    conn.close()
+    if not rows:
+        return set(), False
+    active = {
+        row["sku_code"]
+        for row in rows
+        if int(row["is_active"] or 0) == 1
+    }
+    return active, True
 
 
 def get_report_rows(report_type: str, date_from: str, date_to: str) -> list[dict]:
@@ -513,6 +717,145 @@ def get_report_rows(report_type: str, date_from: str, date_to: str) -> list[dict
     rows = cur.fetchall() or []
     conn.close()
     return [dict(row) for row in rows]
+
+
+def list_queue_items() -> list[dict]:
+    """
+    Возвращает очередь SKU в порядке position.
+
+    Добавляем display_name из каталога, если он есть,
+    чтобы UI мог показать "человеческое" название.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT q.id,
+                  q.sku_code,
+                  q.qty,
+                  q.position,
+                  q.created_at,
+                  q.updated_at,
+                  c.name AS display_name
+           FROM queue_items q
+           LEFT JOIN sku_catalog c ON c.sku_code = q.sku_code
+           ORDER BY q.position ASC"""
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def add_or_update_queue_item(sku_code: str, qty: int) -> int:
+    """
+    Добавляет SKU в очередь или увеличивает количество.
+
+    Мы нормализуем очередь: один SKU = одна строка.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, qty FROM queue_items WHERE sku_code=?", [sku_code])
+    row = cur.fetchone()
+    ts = int(time.time())
+    if row:
+        new_qty = int(row["qty"] or 0) + int(qty)
+        cur.execute(
+            """UPDATE queue_items
+               SET qty=?, updated_at=?
+               WHERE id=?""",
+            [new_qty, ts, int(row["id"])],
+        )
+        conn.commit()
+        conn.close()
+        return int(row["id"])
+
+    cur.execute("SELECT COALESCE(MAX(position), 0) AS max_pos FROM queue_items")
+    max_pos_row = cur.fetchone()
+    next_pos = int(max_pos_row["max_pos"] if max_pos_row else 0) + 1
+    cur.execute(
+        """INSERT INTO queue_items(sku_code, qty, position, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        [sku_code, int(qty), next_pos, ts, ts],
+    )
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(new_id or 0)
+
+
+def update_queue_qty(item_id: int, qty: int) -> None:
+    """
+    Обновляет количество SKU в очереди.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE queue_items SET qty=?, updated_at=? WHERE id=?",
+        [int(qty), int(time.time()), int(item_id)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_queue_item(item_id: int) -> None:
+    """
+    Удаляет позицию из очереди.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM queue_items WHERE id=?", [int(item_id)])
+    conn.commit()
+    conn.close()
+
+
+def reorder_queue_items(item_ids: list[int]) -> None:
+    """
+    Перезаписываем позиции очереди в порядке списка.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    for idx, item_id in enumerate(item_ids, start=1):
+        cur.execute(
+            "UPDATE queue_items SET position=?, updated_at=? WHERE id=?",
+            [idx, int(time.time()), int(item_id)],
+        )
+    conn.commit()
+    conn.close()
+
+
+def replace_queue_items(items: list[dict]) -> None:
+    """
+    Полностью заменяем очередь SKU в транзакции.
+
+    Важно:
+    - если что-то пошло не так, мы откатываем изменения;
+    - позиции пересчитываются по порядку items.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    ts = int(time.time())
+    try:
+        cur.execute("BEGIN")
+        # Сначала очищаем очередь, чтобы не оставлять "старые" позиции.
+        cur.execute("DELETE FROM queue_items")
+        for idx, item in enumerate(items, start=1):
+            cur.execute(
+                """INSERT INTO queue_items(sku_code, qty, position, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [
+                    item["sku_code"],
+                    int(item["qty"]),
+                    idx,
+                    ts,
+                    ts,
+                ],
+            )
+        conn.commit()
+    except Exception:
+        # Любая ошибка — откат, чтобы очередь оставалась в прежнем состоянии.
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def save_session(session) -> int:
@@ -691,6 +1034,203 @@ def get_shift_plan(plan_id: int) -> sqlite3.Row | None:
     row = cur.fetchone()
     conn.close()
     return row
+
+
+def create_shift_plan_with_items(
+    shift_id: int,
+    name: str,
+    created_at: float,
+    items: list[dict],
+) -> int:
+    """
+    Создаёт новый сменный план и делает его активным.
+
+    Объяснение по-учительски:
+    - сначала деактивируем старые планы этой смены, чтобы активным был только один;
+    - сохраняем и JSON-версию (для обратной совместимости), и таблицу items;
+    - порядок строк фиксируем через position.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE shift_plans SET is_active=0 WHERE shift_id=? AND is_active=1",
+        [int(shift_id)],
+    )
+
+    items_json = json.dumps(
+        [{"sku_code": item["sku_code"], "qty": item["qty"]} for item in items],
+        ensure_ascii=False,
+    )
+    cur.execute(
+        """INSERT INTO shift_plans(shift_id, created_at, name, items_json, is_active)
+           VALUES (?, ?, ?, ?, 1)""",
+        [int(shift_id), float(created_at), name, items_json],
+    )
+    plan_id = int(cur.lastrowid or 0)
+
+    if plan_id and items:
+        rows = [
+            (plan_id, item["sku_code"], int(item["qty"]), index)
+            for index, item in enumerate(items)
+        ]
+        cur.executemany(
+            """INSERT INTO shift_plan_items(plan_id, sku_code, qty, position)
+               VALUES (?, ?, ?, ?)""",
+            rows,
+        )
+
+    conn.commit()
+    conn.close()
+    return plan_id
+
+
+def get_active_shift_plan(shift_id: int) -> dict | None:
+    """
+    Возвращает активный сменный план вместе с позициями.
+
+    Учительская ремарка:
+    - храним план в двух местах, но читаем приоритетно из таблицы items;
+    - если items пуст, всё равно возвращаем шапку плана.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, name, created_at, shift_id
+           FROM shift_plans
+           WHERE is_active=1 AND shift_id=?
+           ORDER BY created_at DESC
+           LIMIT 1""",
+        [int(shift_id)],
+    )
+    plan_row = cur.fetchone()
+    if not plan_row:
+        conn.close()
+        return None
+
+    cur.execute(
+        """SELECT sku_code, qty, position
+           FROM shift_plan_items
+           WHERE plan_id=?
+           ORDER BY position ASC""",
+        [int(plan_row["id"])],
+    )
+    items = [dict(row) for row in cur.fetchall() or []]
+    conn.close()
+    return {
+        "id": int(plan_row["id"]),
+        "name": plan_row["name"],
+        "created_at": plan_row["created_at"],
+        "shift_id": plan_row["shift_id"],
+        "items": items,
+    }
+
+
+def set_active_shift_plan(shift_id: int, plan_id: int) -> None:
+    """
+    Делает план активным и выключает остальные.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE shift_plans SET is_active=0 WHERE shift_id=? AND is_active=1",
+        [int(shift_id)],
+    )
+    cur.execute(
+        "UPDATE shift_plans SET is_active=1 WHERE id=? AND shift_id=?",
+        [int(plan_id), int(shift_id)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def clear_active_shift_plan(shift_id: int) -> None:
+    """
+    Снимаем активность с текущего плана.
+
+    Почему так:
+    - план остаётся в истории, но UI больше не считает его активным.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE shift_plans SET is_active=0 WHERE shift_id=? AND is_active=1",
+        [int(shift_id)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_shift_plan_progress_map(shift_id: int, plan_id: int) -> dict[str, int]:
+    """
+    Возвращает словарь sku_code -> done_qty для плана.
+
+    Учительская подсказка:
+    - используем map для быстрого доступа при сборке ответа API.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT sku_code, done_qty
+           FROM shift_plan_progress
+           WHERE shift_id=? AND plan_id=?""",
+        [int(shift_id), int(plan_id)],
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return {row["sku_code"]: int(row["done_qty"] or 0) for row in rows}
+
+
+def increment_shift_plan_progress(
+    shift_id: int,
+    plan_id: int,
+    sku_code: str,
+    delta: int = 1,
+) -> None:
+    """
+    Увеличивает прогресс по SKU для сменного плана.
+
+    Учительская подсказка:
+    - используем UPSERT, чтобы не делать отдельные проверки существования;
+    - updated_at нужен для отладки и возможной аналитики.
+    """
+    if delta <= 0:
+        return
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO shift_plan_progress(shift_id, plan_id, sku_code, done_qty, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(shift_id, plan_id, sku_code)
+           DO UPDATE SET done_qty = done_qty + excluded.done_qty,
+                        updated_at = excluded.updated_at""",
+        [int(shift_id), int(plan_id), sku_code, int(delta), time.time()],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_sku_catalog_map(sku_codes: list[str]) -> dict:
+    """
+    Возвращает словарь sku_code -> запись из каталога.
+
+    Учительская подсказка:
+    - делаем один запрос IN (...), чтобы не бегать по базе циклом;
+    - если список пуст, сразу отдаём пустой словарь.
+    """
+    if not sku_codes:
+        return {}
+    conn = get_conn()
+    cur = conn.cursor()
+    placeholders = ",".join(["?"] * len(sku_codes))
+    cur.execute(
+        f"""SELECT sku_code, name, is_active
+            FROM sku_catalog
+            WHERE sku_code IN ({placeholders})""",
+        sku_codes,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return {row["sku_code"]: dict(row) for row in (rows or [])}
 
 
 def get_active_shift_id() -> int:

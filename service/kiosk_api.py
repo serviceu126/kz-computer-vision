@@ -1,15 +1,16 @@
 from pathlib import Path
 from typing import List, Optional, Literal
+from datetime import datetime
 import re
+import importlib.util
 import json
 import time
 import sqlite3
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from openpyxl import Workbook
 import csv
 import io
 
@@ -21,6 +22,13 @@ from core.storage import (
     get_active_shift_id,
     get_shift_plan,
     list_shift_plans,
+    create_shift_plan_with_items,
+    get_active_shift_plan,
+    set_active_shift_plan,
+    clear_active_shift_plan,
+    get_shift_plan_progress_map,
+    increment_shift_plan_progress,
+    get_sku_catalog_map,
     get_kiosk_setting,
     get_kiosk_settings,
     set_kiosk_setting,
@@ -30,9 +38,25 @@ from core.storage import (
     update_master_last_active,
     list_sku_catalog,
     create_sku_catalog_item,
+    get_sku_catalog_item_by_code,
     update_sku_catalog_item,
+    update_sku_catalog_item_full,
+    update_sku_catalog_item_full_by_code,
+    delete_sku_catalog_item,
+    delete_sku_catalog_item_by_code,
     get_report_rows,
-    get_active_sku_codes,
+    get_sku_catalog_validation_data,
+    list_queue_items,
+    add_or_update_queue_item,
+    update_queue_qty,
+    remove_queue_item,
+    reorder_queue_items,
+    replace_queue_items,
+)
+from core.sku import (
+    build_canonical_sku,
+    normalize_canonical_sku,
+    parse_sku,
 )
 from services.packaging import (
     advance_phase,
@@ -132,6 +156,7 @@ class KioskState(BaseModel):
     # Нужен только для UI, чтобы подсветить, кто имеет право на ручные действия.
     master_mode: bool = False
     master_id: Optional[str] = None
+    master_active: bool = False
 
 
 class StartSessionRequest(BaseModel):
@@ -185,6 +210,10 @@ class ShiftPlanSelectRequest(BaseModel):
     plan_id: int
 
 
+class ShiftPlanActivateRequest(BaseModel):
+    plan_id: int
+
+
 class MasterLoginRequest(BaseModel):
     qr_text: str
 
@@ -195,6 +224,7 @@ class KioskSettingsRequest(BaseModel):
     operator_can_add_sku_to_shift: Optional[bool] = None
     operator_can_remove_sku_from_shift: Optional[bool] = None
     operator_can_manual_mode: Optional[bool] = None
+    allow_operator_shift_plan_import: Optional[bool] = None
     master_session_timeout_min: Optional[int] = None
 
 
@@ -213,8 +243,24 @@ class SkuCreateRequest(BaseModel):
 
 
 class SkuUpdateRequest(BaseModel):
+    sku_code: Optional[str] = None
     name: Optional[str] = None
+    model_code: Optional[str] = None
+    width_cm: Optional[int] = None
+    fabric_code: Optional[str] = None
+    color_code: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class SkuCatalogUpsertRequest(BaseModel):
+    sku_code: str
+    model_code: str
+    width_cm: int
+    fabric_code: str
+    color_code: str
+    name: str
+    is_active: Optional[bool] = True
+    previous_sku_code: Optional[str] = None
 
 
 class ReportSaveRequest(BaseModel):
@@ -222,6 +268,19 @@ class ReportSaveRequest(BaseModel):
     date_from: str
     date_to: str
     format: Literal["csv", "xlsx"]
+
+
+class QueueAddRequest(BaseModel):
+    sku_code: str
+    qty: int = 1
+
+
+class QueueUpdateRequest(BaseModel):
+    qty: int
+
+
+class QueueReorderRequest(BaseModel):
+    item_ids: List[int]
 
 
 def update_master_activity():
@@ -274,6 +333,29 @@ def ensure_master_mode() -> dict:
     return session
 
 
+def is_master_active() -> bool:
+    """
+    Проверяем, активен ли мастер-режим.
+
+    Это нужно для разграничения прав оператора и мастера.
+    """
+    session = get_master_session()
+    return bool(session.get("enabled"))
+
+
+def ensure_queue_permission(setting_key: str) -> None:
+    """
+    Проверяем право на изменение очереди.
+
+    Мастер всегда может, оператор — только если разрешено настройкой.
+    """
+    ensure_master_session_alive()
+    if is_master_active():
+        return
+    if get_kiosk_setting(setting_key, 0) != 1:
+        raise HTTPException(status_code=403, detail="Операция запрещена настройками мастера.")
+
+
 def validate_report_params(report_type: str, date_from: str, date_to: str) -> None:
     """
     Проверяем параметры отчёта, чтобы backend не падал на неверных датах.
@@ -306,6 +388,17 @@ def build_report_csv(rows: list[dict], headers: list[str]) -> bytes:
 
 
 def build_report_xlsx(rows: list[dict], headers: list[str]) -> bytes:
+    """
+    Собираем XLSX, но импортируем openpyxl только внутри функции.
+
+    Это важно: сервер должен запускаться без openpyxl,
+    а при отсутствии библиотеки мы возвращаем понятную ошибку.
+    """
+    try:
+        from openpyxl import Workbook
+    except ImportError as exc:
+        raise HTTPException(status_code=400, detail="Для XLSX установите openpyxl.") from exc
+
     wb = Workbook()
     ws = wb.active
     ws.append(headers)
@@ -317,6 +410,270 @@ def build_report_xlsx(rows: list[dict], headers: list[str]) -> bytes:
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
+
+
+def detect_csv_delimiter(sample_line: str) -> str:
+    """
+    Определяем разделитель CSV по первой строке.
+
+    Мы допускаем три варианта: запятая, точка с запятой, таб.
+    Выбираем тот, который встречается чаще остальных.
+    """
+    candidates = [",", ";", "\t"]
+    counts = {sep: sample_line.count(sep) for sep in candidates}
+    best = max(counts, key=counts.get)
+    return best if counts[best] > 0 else ","
+
+
+MAX_SHIFT_PLAN_ROWS = 500
+
+
+def validate_sku_format(raw: str) -> tuple[str | None, str | None]:
+    """
+    Валидируем SKU строго по каноническому формату.
+
+    Канон: MM.Кровать.NNN-NN.Модель.XX
+    Никаких автоматических исправлений — только проверка.
+    """
+    try:
+        normalized = normalize_canonical_sku(raw)
+    except ValueError as exc:
+        return None, str(exc)
+    return normalized, None
+
+
+def parse_shift_plan_csv_file(text: str) -> tuple[list[dict], list[str]]:
+    """
+    Парсим CSV-файл сменного задания.
+
+    Что важно:
+    - принимаем ';' и ',' как разделители;
+    - первая строка может быть заголовком;
+    - пустые строки пропускаем;
+    - количество строк ограничиваем, чтобы не перегружать киоск.
+    """
+    errors: list[str] = []
+    items: list[dict] = []
+
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return [], ["Файл пуст или не содержит данных."]
+
+    delimiter = detect_csv_delimiter(lines[0])
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    rows = list(reader)
+    if not rows:
+        return [], ["Файл пуст или не содержит данных."]
+
+    header = [cell.strip().lower() for cell in rows[0]]
+    has_header = any(cell in ("sku", "sku_code", "артикул") for cell in header)
+    start_index = 1 if has_header else 0
+
+    for row_index, row in enumerate(rows[start_index:], start=start_index + 1):
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        if len(items) >= MAX_SHIFT_PLAN_ROWS:
+            errors.append("Превышен лимит: максимум 500 строк.")
+            break
+
+        sku_code = (row[0] if len(row) > 0 else "").strip()
+        qty_raw = (row[1] if len(row) > 1 else "").strip()
+        if not sku_code:
+            errors.append(f"Строка {row_index}: SKU не указан.")
+            continue
+        try:
+            sku_code = normalize_canonical_sku(sku_code)
+        except ValueError as exc:
+            errors.append(f"Строка {row_index}: {exc}")
+            continue
+        if qty_raw:
+            try:
+                qty = int(qty_raw)
+            except ValueError:
+                errors.append(f"Строка {row_index}: количество '{qty_raw}' не является числом.")
+                continue
+        else:
+            qty = 1
+        if qty <= 0:
+            errors.append(f"Строка {row_index}: количество должно быть больше нуля.")
+            continue
+
+        items.append({"sku_code": sku_code, "qty": qty})
+
+    return items, errors
+
+
+def parse_shift_plan_json_file(text: str) -> tuple[str, list[dict], list[str]]:
+    """
+    Парсим JSON-файл сменного задания.
+
+    Формат:
+    { "plan_name": "...", "items": [ {"sku_code": "...", "qty": 3}, ... ] }
+    """
+    errors: list[str] = []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return "", [], ["JSON не распознан: проверьте формат файла."]
+
+    if not isinstance(payload, dict):
+        return "", [], ["JSON должен содержать объект с полями plan_name и items."]
+
+    plan_name = str(payload.get("plan_name") or "").strip()
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        return plan_name, [], ["Поле items должно быть списком."]
+
+    if len(raw_items) > MAX_SHIFT_PLAN_ROWS:
+        return plan_name, [], ["Превышен лимит: максимум 500 строк."]
+
+    items: list[dict] = []
+    for index, raw in enumerate(raw_items, start=1):
+        if not isinstance(raw, dict):
+            errors.append(f"Строка {index}: элемент должен быть объектом.")
+            continue
+        sku_code = str(raw.get("sku_code") or "").strip()
+        qty_raw = raw.get("qty", 1)
+        if not sku_code:
+            errors.append(f"Строка {index}: SKU не указан.")
+            continue
+        try:
+            sku_code = normalize_canonical_sku(sku_code)
+        except ValueError as exc:
+            errors.append(f"Строка {index}: {exc}")
+            continue
+        try:
+            qty = int(qty_raw)
+        except (TypeError, ValueError):
+            errors.append(f"Строка {index}: количество '{qty_raw}' не является числом.")
+            continue
+        if qty <= 0:
+            errors.append(f"Строка {index}: количество должно быть больше нуля.")
+            continue
+        items.append({"sku_code": sku_code, "qty": qty})
+
+    return plan_name, items, errors
+
+
+def build_csv_response(rows: list[dict], headers: list[str]) -> PlainTextResponse:
+    """
+    Формируем CSV-ответ без Excel-зависимостей.
+
+    Почему так:
+    - CSV читается Excel/LibreOffice;
+    - не тянем тяжёлые библиотеки на сервере.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([row.get(key, "") for key in headers])
+    return PlainTextResponse(buffer.getvalue(), media_type="text/csv; charset=utf-8")
+
+
+def parse_report_date(date_str: str) -> tuple[float, float]:
+    """
+    Преобразуем YYYY-MM-DD в диапазон таймштампов.
+    """
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Ожидается дата в формате YYYY-MM-DD.") from exc
+    start = datetime(date_obj.year, date_obj.month, date_obj.day, 0, 0, 0)
+    end = datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, 59)
+    return start.timestamp(), end.timestamp()
+
+
+def format_timestamp(ts_value: float | None) -> str:
+    """
+    Делаем понятный текст времени для CSV.
+    """
+    if not ts_value:
+        return ""
+    return datetime.fromtimestamp(ts_value).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def parse_shift_plan_csv(
+    text: str,
+    active_sku_codes: set[str],
+    validate_against_catalog: bool,
+) -> tuple[list[dict], list[str]]:
+    """
+    Парсим CSV в список SKU с количеством.
+
+    Возвращаем:
+    - items: список словарей {sku_code, qty} в порядке появления;
+    - errors: список текстовых ошибок для пользователя.
+    """
+    errors: list[str] = []
+    aggregated: dict[str, int] = {}
+    order: list[str] = []
+
+    # Берём первую непустую строку, чтобы выбрать разделитель.
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return [], ["Файл пуст или не содержит данных."]
+
+    delimiter = detect_csv_delimiter(lines[0])
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+
+    # Проверяем, есть ли заголовок "sku_code, qty".
+    header = None
+    try:
+        header = next(reader)
+    except StopIteration:
+        return [], ["Файл пуст или не содержит данных."]
+
+    header_cells = [cell.strip().lower() for cell in header]
+    has_header = "sku_code" in header_cells and "qty" in header_cells
+
+    if not has_header:
+        # Если заголовка нет, возвращаемся на первую строку как на данные.
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+
+    for row in reader:
+        if not row or not any(cell.strip() for cell in row):
+            # Пропускаем полностью пустые строки.
+            continue
+        sku_raw = (row[0] if len(row) > 0 else "").strip()
+        qty_raw = (row[1] if len(row) > 1 else "").strip()
+        line_no = reader.line_num
+
+        if not sku_raw:
+            errors.append(f"Строка {line_no}: SKU не указан.")
+            continue
+        try:
+            sku_raw = normalize_canonical_sku(sku_raw)
+        except ValueError as exc:
+            errors.append(f"Строка {line_no}: {exc}")
+            continue
+        if not qty_raw:
+            errors.append(f"Строка {line_no}: количество не указано.")
+            continue
+        try:
+            qty_val = int(qty_raw)
+        except ValueError:
+            errors.append(f"Строка {line_no}: количество '{qty_raw}' не является числом.")
+            continue
+        if qty_val <= 0:
+            errors.append(f"Строка {line_no}: количество должно быть больше нуля.")
+            continue
+
+        if validate_against_catalog and sku_raw not in active_sku_codes:
+            errors.append(
+                f"Строка {line_no}: SKU '{sku_raw}' отсутствует или неактивен в каталоге."
+            )
+            continue
+
+        # Повторяющиеся SKU суммируем, а порядок берём по первой встрече.
+        if sku_raw not in aggregated:
+            aggregated[sku_raw] = qty_val
+            order.append(sku_raw)
+        else:
+            aggregated[sku_raw] += qty_val
+
+    items = [{"sku_code": sku, "qty": aggregated[sku]} for sku in order]
+    return items, errors
 
 
 def find_usb_mounts() -> list[Path]:
@@ -440,7 +797,33 @@ async def get_state():
         ],
         master_mode=bool(master_id),
         master_id=master_id,
+        master_active=bool(master_id),
     )
+    return {"status": "ok", "master_id": master_id}
+
+
+@app.post("/api/kiosk/master/logout")
+async def master_logout(payload: MasterLogoutRequest):
+    """
+    Выход из режима мастера.
+
+    Мы просто очищаем master_id, чтобы UI вернулся к обычному режиму.
+    """
+    session = get_master_session()
+    master_id = session.get("master_id") if session.get("enabled") else None
+    reason = payload.reason or "manual"
+    if master_id:
+        add_event(
+            event_type="master_logout",
+            ts=time.time(),
+            payload_json=json.dumps(
+                {"master_id": master_id, "reason": reason},
+                ensure_ascii=False,
+            ),
+            shift_id=get_active_shift_id(),
+        )
+    clear_master_session()
+    return {"status": "ok", "reason": reason}
 
 
 @app.post("/api/kiosk/master/login")
@@ -455,7 +838,7 @@ async def master_login(payload: MasterLoginRequest):
     - мы быстро валидируем его без внешних сервисов.
     """
     qr_text = (payload.qr_text or "").strip()
-    match = re.fullmatch(r"M(\d{8})", qr_text)
+    match = re.fullmatch(r"[MМ](\d{8})", qr_text)
     if not match:
         raise HTTPException(
             status_code=400,
@@ -724,20 +1107,46 @@ async def pack_plan_upload(payload: ShiftPlanUploadRequest):
 
     items = [item.strip() for item in raw_items if item and item.strip()]
     if not items:
-        raise HTTPException(status_code=400, detail="Список SKU пуст.")
+        raise HTTPException(status_code=422, detail="Список SKU пуст.")
+
+    # Учительская подсказка: нормализуем SKU и проверяем наличие в каталоге,
+    # чтобы в план не попадали случайные или устаревшие коды.
+    catalog_items = list_sku_catalog(include_inactive=False)
+    catalog_map = {row["sku_code"]: row for row in catalog_items}
+    errors: list[str] = []
+    aggregated: dict[str, int] = {}
+    order: list[str] = []
+
+    for raw in items:
+        try:
+            sku_code = normalize_canonical_sku(raw)
+        except ValueError as exc:
+            errors.append(f"SKU '{raw}': {exc}")
+            continue
+        if catalog_map and sku_code not in catalog_map:
+            errors.append(f"SKU '{sku_code}' отсутствует в каталоге.")
+            continue
+        if sku_code not in aggregated:
+            aggregated[sku_code] = 1
+            order.append(sku_code)
+        else:
+            aggregated[sku_code] += 1
+
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
 
     name = (payload.name or "Сменное задание").strip()
-    plan_id = create_shift_plan(
+    plan_id = create_shift_plan_with_items(
         shift_id=shift_id,
         name=name,
         created_at=time.time(),
-        items_json=json.dumps(items, ensure_ascii=False),
+        items=[{"sku_code": sku, "qty": aggregated[sku]} for sku in order],
     )
-    return {"status": "ok", "id": plan_id, "name": name, "count": len(items)}
+    return {"status": "ok", "id": plan_id, "name": name, "count": len(order)}
 
 
-@app.post("/api/kiosk/shift_plan/import")
-async def shift_plan_import(file: UploadFile = File(...)):
+@app.post("/api/kiosk/shift_plan/import_csv")
+async def shift_plan_import_csv(request: Request):
     """
     Импорт сменного задания из CSV (только мастер).
 
@@ -745,65 +1154,233 @@ async def shift_plan_import(file: UploadFile = File(...)):
     - sku_code, qty
     """
     ensure_master_mode()
-    shift_id = get_active_shift_id()
-    if not shift_id:
-        raise HTTPException(status_code=409, detail="Нет активной смены для импорта плана.")
+    update_master_activity()
 
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Нужен файл CSV.")
+    # Проверяем наличие python-multipart только при попытке импорта,
+    # чтобы сервер мог запускаться без дополнительной зависимости.
+    if importlib.util.find_spec("multipart") is None:
+        raise HTTPException(
+            status_code=501,
+            detail="File upload requires python-multipart. Install it or use alternative import method.",
+        )
+
+    # Читаем файл из multipart формы.
+    try:
+        form = await request.form()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Не удалось прочитать форму загрузки.",
+        ) from exc
+
+    file = form.get("file")
+    if not file or not getattr(file, "filename", ""):
+        raise HTTPException(status_code=400, detail="Файл не найден в запросе.")
 
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Файл CSV пуст.")
 
-    text = content.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames or "sku_code" not in reader.fieldnames or "qty" not in reader.fieldnames:
-        raise HTTPException(status_code=400, detail="CSV должен содержать колонки sku_code и qty.")
+    # CSV читаем в Unicode, чтобы корректно обрабатывать кириллицу.
+    text = content.decode("utf-8-sig", errors="replace")
 
-    active_skus = get_active_sku_codes()
-    errors = []
-    skipped = 0
-    aggregated: dict[str, int] = {}
-
-    for idx, row in enumerate(reader, start=2):
-        sku = (row.get("sku_code") or "").strip()
-        qty_raw = (row.get("qty") or "").strip()
-        if not sku or not qty_raw:
-            skipped += 1
-            continue
-        if sku not in active_skus:
-            errors.append({"row": idx, "sku": sku, "error": "SKU не найден или не активен."})
-            continue
-        try:
-            qty = int(qty_raw)
-        except ValueError:
-            errors.append({"row": idx, "sku": sku, "error": "Количество должно быть целым числом."})
-            continue
-        if qty <= 0:
-            errors.append({"row": idx, "sku": sku, "error": "Количество должно быть больше нуля."})
-            continue
-        aggregated[sku] = aggregated.get(sku, 0) + qty
+    # Сначала берём список активных SKU, если каталог вообще есть.
+    active_skus, has_catalog = get_sku_catalog_validation_data()
+    items, errors = parse_shift_plan_csv(text, active_skus, has_catalog)
 
     if errors:
-        # Если есть ошибки, ничего не применяем — импорт атомарный.
-        return {"status": "error", "added_items": 0, "skipped": skipped, "errors": errors}
+        # Если есть ошибки — ничего не меняем, импорт атомарный.
+        return JSONResponse(status_code=422, content={"ok": False, "errors": errors})
 
-    items = [{"sku": sku, "qty": qty} for sku, qty in aggregated.items()]
     if not items:
-        return {"status": "error", "added_items": 0, "skipped": skipped, "errors": ["Нет валидных строк."]}
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "errors": ["Нет валидных строк."]},
+        )
 
-    name = f"Импорт CSV {time.strftime('%Y-%m-%d %H:%M')}"
-    plan_id = create_shift_plan(
+    # Полностью заменяем очередь, чтобы на смене был только новый список.
+    replace_queue_items(items)
+    return {"ok": True, "imported_count": len(items), "errors": []}
+
+
+@app.get("/api/kiosk/shift_plan")
+async def shift_plan_get():
+    """
+    Возвращает активный сменный план или пустой ответ.
+    """
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        return {"plan": None}
+    plan = get_active_shift_plan(shift_id)
+    if not plan:
+        return {"plan": None}
+
+    sku_codes = [item["sku_code"] for item in plan.get("items", [])]
+    sku_map = get_sku_catalog_map(sku_codes)
+    unknown_skus = [sku for sku in sku_codes if sku not in sku_map]
+    progress_map = get_shift_plan_progress_map(shift_id, int(plan["id"]))
+    normalized_items = []
+    for item in plan.get("items", []):
+        sku_code = item["sku_code"]
+        sku_meta = sku_map.get(sku_code) or {}
+        done_qty = int(progress_map.get(sku_code, 0))
+        qty = int(item["qty"])
+        normalized_items.append(
+            {
+                "sku_code": sku_code,
+                "qty": qty,
+                "position": int(item["position"]),
+                "name": sku_meta.get("name"),
+                "done_qty": done_qty,
+                "remaining_qty": max(qty - done_qty, 0),
+            }
+        )
+
+    return {
+        "plan": {
+            "id": plan["id"],
+            "plan_name": plan["name"],
+            "created_at": plan["created_at"],
+            "shift_id": plan["shift_id"],
+            "items": normalized_items,
+        },
+        "unknown_skus": unknown_skus,
+    }
+
+
+@app.post("/api/kiosk/shift_plan/import")
+async def shift_plan_import(file: UploadFile = File(...)):
+    """
+    Импорт сменного задания из CSV (мастер или разрешённый оператор).
+
+    Учительская ремарка:
+    - файл сразу активирует план, чтобы очередь обновилась без лишних шагов;
+    - импорт остаётся CSV, Excel/JSON добавим позже при необходимости.
+
+    Команды для проверки (как в инструкции):
+    - запуск сервера: python -m uvicorn service.kiosk_api:app --host 0.0.0.0 --port 8000 --reload
+    - проверка импорта: curl -F "file=@plan.csv" http://127.0.0.1:8000/api/kiosk/shift_plan/import
+    """
+    ensure_master_session_alive()
+    allow_operator_import = bool(get_kiosk_setting("allow_operator_shift_plan_import", 0))
+    if not is_master_active() and not allow_operator_import:
+        raise HTTPException(
+            status_code=403,
+            detail="Импорт доступен только мастеру или при разрешении в настройках.",
+        )
+    if is_master_active():
+        update_master_activity()
+
+    # Проверяем наличие python-multipart только при попытке импорта,
+    # чтобы сервер мог запускаться без дополнительной зависимости.
+    if importlib.util.find_spec("multipart") is None:
+        raise HTTPException(
+            status_code=501,
+            detail="Загрузка файлов недоступна: нужен python-multipart.",
+        )
+
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="Файл не найден в запросе.")
+
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Поддерживается только CSV.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Файл пуст.")
+
+    text = content.decode("utf-8-sig", errors="replace")
+    items: list[dict] = []
+    errors: list[str] = []
+    plan_name = ""
+
+    items, errors = parse_shift_plan_csv_file(text)
+
+    if errors:
+        return JSONResponse(status_code=422, content={"errors": errors})
+    if not items:
+        return JSONResponse(status_code=422, content={"errors": ["Нет валидных строк."]})
+
+    if not plan_name:
+        plan_name = (Path(file.filename).stem or "Сменное задание").strip()
+    if not plan_name:
+        plan_name = "Сменное задание"
+
+    # Учительская подсказка: загружаем активный каталог и сверяем коды.
+    catalog_items = list_sku_catalog(include_inactive=False)
+    catalog_map = {row["sku_code"]: row for row in catalog_items}
+
+    normalized_items = []
+    items_for_storage: list[dict] = []
+    for item in items:
+        sku_code = item["sku_code"]
+        if catalog_map and sku_code not in catalog_map:
+            errors.append(f"SKU '{sku_code}' отсутствует в каталоге.")
+            continue
+        sku_meta = catalog_map.get(sku_code) or {}
+        normalized_items.append(
+            {
+                "sku_code": sku_code,
+                "qty": int(item["qty"]),
+                "name": sku_meta.get("name"),
+            }
+        )
+        items_for_storage.append({"sku_code": sku_code, "qty": int(item["qty"])})
+
+    if errors:
+        return JSONResponse(status_code=422, content={"errors": errors})
+
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
+    plan_id = create_shift_plan_with_items(
         shift_id=shift_id,
-        name=name,
+        name=plan_name,
         created_at=time.time(),
-        items_json=json.dumps(items, ensure_ascii=False),
+        items=items_for_storage,
     )
-    # Новый импорт становится текущим планом смены,
-    # чтобы оператор сразу видел обновлённый список.
-    shift_plans.select_plan(shift_id, plan_id)
-    return {"status": "ok", "added_items": items, "skipped": skipped, "errors": []}
+
+    return {
+        "plan_id": plan_id,
+        "plan_name": plan_name,
+        "total_items": len(items_for_storage),
+        "normalized_items": normalized_items,
+    }
+
+
+@app.post("/api/kiosk/shift_plan/activate")
+async def shift_plan_activate(payload: ShiftPlanActivateRequest):
+    """
+    Активируем выбранный план (только мастер).
+    """
+    ensure_master_mode()
+    update_master_activity()
+
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
+
+    row = get_shift_plan(payload.plan_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="План не найден.")
+    if int(row["shift_id"]) != int(shift_id):
+        raise HTTPException(status_code=409, detail="План не относится к активной смене.")
+    set_active_shift_plan(shift_id, payload.plan_id)
+    return {"status": "ok", "plan_id": payload.plan_id}
+
+
+@app.post("/api/kiosk/shift_plan/clear")
+async def shift_plan_clear():
+    """
+    Очищаем активный план (только мастер).
+    """
+    ensure_master_mode()
+    update_master_activity()
+    shift_id = get_active_shift_id()
+    if not shift_id:
+        raise HTTPException(status_code=409, detail="Нет активной смены.")
+    clear_active_shift_plan(shift_id)
+    return {"status": "ok"}
 
 
 @app.get("/api/kiosk/pack/plan/list")
@@ -886,6 +1463,7 @@ async def get_kiosk_settings_api():
             "operator_can_add_sku_to_shift",
             "operator_can_remove_sku_from_shift",
             "operator_can_manual_mode",
+            "allow_operator_shift_plan_import",
             "master_session_timeout_min",
         ]
     )
@@ -899,6 +1477,9 @@ async def get_kiosk_settings_api():
             "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
             "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
             "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
+            "allow_operator_shift_plan_import": bool(
+                settings.get("allow_operator_shift_plan_import", 0)
+            ),
             "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
         },
         "master_mode": bool(master_id),
@@ -940,6 +1521,12 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
     if payload.operator_can_manual_mode is not None:
         set_kiosk_setting("operator_can_manual_mode", int(payload.operator_can_manual_mode))
         changed_keys.append("operator_can_manual_mode")
+    if payload.allow_operator_shift_plan_import is not None:
+        set_kiosk_setting(
+            "allow_operator_shift_plan_import",
+            int(payload.allow_operator_shift_plan_import),
+        )
+        changed_keys.append("allow_operator_shift_plan_import")
     if payload.master_session_timeout_min is not None:
         timeout = int(payload.master_session_timeout_min)
         if timeout < 1 or timeout > 240:
@@ -968,6 +1555,7 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
             "operator_can_add_sku_to_shift",
             "operator_can_remove_sku_from_shift",
             "operator_can_manual_mode",
+            "allow_operator_shift_plan_import",
             "master_session_timeout_min",
         ]
     )
@@ -979,6 +1567,9 @@ async def set_kiosk_settings_api(payload: KioskSettingsRequest):
             "operator_can_add_sku_to_shift": bool(settings.get("operator_can_add_sku_to_shift", 1)),
             "operator_can_remove_sku_from_shift": bool(settings.get("operator_can_remove_sku_from_shift", 1)),
             "operator_can_manual_mode": bool(settings.get("operator_can_manual_mode", 1)),
+            "allow_operator_shift_plan_import": bool(
+                settings.get("allow_operator_shift_plan_import", 0)
+            ),
             "master_session_timeout_min": int(settings.get("master_session_timeout_min", 15)),
         },
         "master_mode": True,
@@ -1002,24 +1593,164 @@ async def sku_list(
     return {"status": "ok", "items": items}
 
 
+@app.get("/api/kiosk/sku_catalog")
+async def sku_catalog_list():
+    """
+    Возвращает базовый список SKU для операторского UI.
+
+    Учительский акцент:
+    - здесь не требуется мастер-режим, потому что данные только для выбора;
+    - отдаём минимум полей, чтобы ответ был лёгким и быстрым.
+    """
+    items = list_sku_catalog(include_inactive=False)
+    return {
+        "items": [
+            {
+                "sku_code": item.get("sku_code"),
+                "name": item.get("name"),
+                "is_active": bool(item.get("is_active")),
+            }
+            for item in items
+        ]
+    }
+
+
+@app.post("/api/kiosk/sku_catalog")
+async def sku_catalog_upsert(payload: SkuCatalogUpsertRequest):
+    """
+    Создаёт или обновляет SKU по его коду.
+
+    Учительская ремарка:
+    - редактировать каталог может только мастер;
+    - sku_code остаётся каноническим и единым для UI и БД.
+    """
+    ensure_master_mode()
+    try:
+        sku_from_parts = normalize_canonical_sku(
+            build_canonical_sku(
+                model_code=payload.model_code,
+                width_cm=payload.width_cm,
+                fabric_code=payload.fabric_code,
+                color_code=payload.color_code,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        payload_code = normalize_canonical_sku(payload.sku_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if payload_code != sku_from_parts:
+        raise HTTPException(
+            status_code=422,
+            detail="SKU не совпадает с параметрами. Проверьте модель, ширину, ткань и цвет.",
+        )
+
+    parsed = parse_sku(sku_from_parts)
+    if not parsed:
+        raise HTTPException(
+            status_code=422,
+            detail="SKU не удалось разобрать. Проверьте формат MM.Кровать.001-16.VelutaLux.07.",
+        )
+    sku_code = sku_from_parts
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Название SKU не должно быть пустым.")
+    previous_code = (payload.previous_sku_code or "").strip()
+    if previous_code:
+        try:
+            previous_code = normalize_canonical_sku(previous_code)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    target_code = previous_code or sku_code
+    existing = get_sku_catalog_item_by_code(target_code) if target_code else None
+    if previous_code and previous_code != sku_code:
+        # Учительская ремарка: при смене sku_code убеждаемся, что новый код не занят.
+        if get_sku_catalog_item_by_code(sku_code):
+            raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.")
+    try:
+        if existing:
+            update_sku_catalog_item_full_by_code(
+                current_sku_code=target_code,
+                new_sku_code=sku_code,
+                name=name,
+                model_code=f"{parsed['model_num']:03d}",
+                width_cm=int(parsed["size"]),
+                fabric_code=parsed["fabric"],
+                color_code=f"{parsed['color']:02d}",
+                is_active=1 if payload.is_active else 0,
+            )
+        else:
+            create_sku_catalog_item(
+                sku_code=sku_code,
+                name=name,
+                model_code=f"{parsed['model_num']:03d}",
+                width_cm=int(parsed["size"]),
+                fabric_code=parsed["fabric"],
+                color_code=f"{parsed['color']:02d}",
+                is_active=1 if payload.is_active else 0,
+            )
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.") from exc
+    return {"ok": True, "sku": get_sku_catalog_item_by_code(sku_code)}
+
+
+@app.delete("/api/kiosk/sku_catalog/{sku_code}")
+async def sku_catalog_delete(sku_code: str):
+    """
+    Удаляет SKU по коду.
+
+    Учительская ремарка:
+    - удалять может только мастер;
+    - sku_code берём из URL, чтобы удаление было прозрачным.
+    """
+    ensure_master_mode()
+    try:
+        canonical = normalize_canonical_sku(sku_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    delete_sku_catalog_item_by_code(canonical)
+    return {"ok": True}
+
+
 @app.post("/api/kiosk/sku")
 async def sku_create(payload: SkuCreateRequest):
     """
     Создаёт SKU в каталоге (только мастер).
     """
     ensure_master_mode()
-    sku_code = payload.sku_code.strip()
+    # Учительская подсказка: строим SKU из полей и строго валидируем формат.
+    try:
+        sku_code = normalize_canonical_sku(
+            build_canonical_sku(
+                model_code=payload.model_code,
+                width_cm=payload.width_cm,
+                fabric_code=payload.fabric_code,
+                color_code=payload.color_code,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    parsed = parse_sku(sku_code)
+    if not parsed:
+        raise HTTPException(
+            status_code=422,
+            detail="SKU не удалось разобрать. Проверьте формат MM.Кровать.001-16.VelutaLux.07.",
+        )
     name = payload.name.strip()
     if not sku_code or not name:
-        raise HTTPException(status_code=400, detail="SKU и имя не должны быть пустыми.")
+        raise HTTPException(status_code=422, detail="SKU и имя не должны быть пустыми.")
     try:
         sku_id = create_sku_catalog_item(
             sku_code=sku_code,
             name=name,
-            model_code=payload.model_code.strip(),
-            width_cm=int(payload.width_cm),
-            fabric_code=payload.fabric_code.strip(),
-            color_code=payload.color_code.strip(),
+            model_code=f"{parsed['model_num']:03d}",
+            width_cm=int(parsed["size"]),
+            fabric_code=parsed["fabric"],
+            color_code=f"{parsed['color']:02d}",
             is_active=1 if payload.is_active else 0,
         )
     except sqlite3.IntegrityError:
@@ -1030,15 +1761,151 @@ async def sku_create(payload: SkuCreateRequest):
 @app.put("/api/kiosk/sku/{sku_id}")
 async def sku_update(sku_id: int, payload: SkuUpdateRequest):
     """
-    Редактирует SKU (только имя и активность), только мастер.
+    Редактирует SKU, только мастер.
     """
     ensure_master_mode()
-    update_sku_catalog_item(
-        sku_id=sku_id,
-        name=payload.name.strip() if payload.name is not None else None,
-        is_active=1 if payload.is_active else (0 if payload.is_active is False else None),
-    )
+    if payload.model_code is not None or payload.width_cm is not None or payload.fabric_code is not None:
+        # Учительская подсказка: при полном редактировании пересобираем SKU и валидируем его.
+        try:
+            sku_code = normalize_canonical_sku(
+                build_canonical_sku(
+                    model_code=payload.model_code or "",
+                    width_cm=payload.width_cm or "",
+                    fabric_code=payload.fabric_code or "",
+                    color_code=payload.color_code or "",
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        parsed = parse_sku(sku_code)
+        if not parsed:
+            raise HTTPException(
+                status_code=422,
+                detail="SKU не удалось разобрать. Проверьте формат MM.Кровать.001-16.VelutaLux.07.",
+            )
+        try:
+            update_sku_catalog_item_full(
+                sku_id=sku_id,
+                sku_code=sku_code,
+                name=(payload.name or "").strip(),
+                model_code=f"{parsed['model_num']:03d}",
+                width_cm=int(parsed["size"]),
+                fabric_code=parsed["fabric"],
+                color_code=f"{parsed['color']:02d}",
+                is_active=1 if payload.is_active else 0,
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="SKU с таким кодом уже существует.") from exc
+    else:
+        update_sku_catalog_item(
+            sku_id=sku_id,
+            name=payload.name.strip() if payload.name is not None else None,
+            is_active=1 if payload.is_active else (0 if payload.is_active is False else None),
+        )
     return {"status": "ok"}
+
+
+@app.delete("/api/kiosk/sku/{sku_id}")
+async def sku_delete(sku_id: int):
+    """
+    Удаляет SKU из каталога, только мастер.
+    """
+    ensure_master_mode()
+    delete_sku_catalog_item(sku_id)
+    return {"status": "ok"}
+
+
+@app.get("/api/kiosk/reports/shift.csv")
+async def report_shift_csv(date: str = Query(...)):
+    """
+    Заглушка отчёта по смене (CSV).
+
+    Важно:
+    - отдаём простой CSV, чтобы не тянуть Excel-зависимости;
+    - если данных нет, возвращаем только заголовок.
+    """
+    ensure_master_mode()
+    update_master_activity()
+
+    start_ts, end_ts = parse_report_date(date)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, work_center, start_time, end_time
+           FROM worker_shifts
+           WHERE start_time >= ? AND start_time <= ?
+           ORDER BY start_time ASC""",
+        [start_ts, end_ts],
+    )
+    shift_rows = cur.fetchall() or []
+
+    rows: list[dict] = []
+    for row in shift_rows:
+        cur.execute(
+            "SELECT COUNT(*) AS packed_count FROM sessions WHERE shift_id=?",
+            [int(row["id"])],
+        )
+        packed_count = int((cur.fetchone() or {"packed_count": 0})["packed_count"])
+        rows.append(
+            {
+                "shift_id": int(row["id"]),
+                "shift_label": row["work_center"],
+                "start_time": format_timestamp(row["start_time"]),
+                "end_time": format_timestamp(row["end_time"]),
+                "packed_count": packed_count,
+                "idle_minutes": 0,
+            }
+        )
+    conn.close()
+    headers = ["shift_id", "shift_label", "start_time", "end_time", "packed_count", "idle_minutes"]
+    return build_csv_response(rows, headers)
+
+
+@app.get("/api/kiosk/reports/workers.csv")
+async def report_workers_csv(date: str = Query(...)):
+    """
+    Заглушка отчёта по сотрудникам (CSV).
+    """
+    ensure_master_mode()
+    update_master_activity()
+
+    start_ts, end_ts = parse_report_date(date)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT worker_id,
+                  SUM(worktime_sec) AS total_work_seconds,
+                  SUM(downtime_sec) AS total_idle_seconds,
+                  COUNT(*) AS packed_count
+           FROM sessions
+           WHERE start_time >= ? AND start_time <= ?
+           GROUP BY worker_id
+           ORDER BY worker_id ASC""",
+        [start_ts, end_ts],
+    )
+    worker_rows = cur.fetchall() or []
+    rows = []
+    for row in worker_rows:
+        worker_id = row["worker_id"]
+        rows.append(
+            {
+                "worker_id": worker_id,
+                "worker_name": worker_id,
+                "total_work_seconds": int(row["total_work_seconds"] or 0),
+                "total_idle_seconds": int(row["total_idle_seconds"] or 0),
+                "packed_count": int(row["packed_count"] or 0),
+            }
+        )
+    conn.close()
+    headers = [
+        "worker_id",
+        "worker_name",
+        "total_work_seconds",
+        "total_idle_seconds",
+        "packed_count",
+    ]
+    return build_csv_response(rows, headers)
 
 
 @app.get("/api/kiosk/reports/preview")
@@ -1109,6 +1976,65 @@ async def report_save_to_usb(payload: ReportSaveRequest):
         content = build_report_csv(rows, headers)
     target_path.write_bytes(content)
     return {"status": "ok", "path": str(target_path)}
+
+
+@app.get("/api/kiosk/queue")
+async def queue_list():
+    """
+    Возвращает очередь SKU для отображения в UI.
+    """
+    ensure_master_session_alive()
+    items = list_queue_items()
+    return {"status": "ok", "items": items}
+
+
+@app.post("/api/kiosk/queue/items")
+async def queue_add(payload: QueueAddRequest):
+    """
+    Добавляет SKU в очередь.
+    """
+    ensure_queue_permission("operator_can_add_sku_to_shift")
+    sku_code = (payload.sku_code or "").strip()
+    if not sku_code:
+        raise HTTPException(status_code=400, detail="SKU не указан.")
+    if payload.qty <= 0:
+        raise HTTPException(status_code=400, detail="Количество должно быть больше нуля.")
+    item_id = add_or_update_queue_item(sku_code, payload.qty)
+    return {"status": "ok", "id": item_id}
+
+
+@app.patch("/api/kiosk/queue/items/{item_id}")
+async def queue_update(item_id: int, payload: QueueUpdateRequest):
+    """
+    Обновляет количество SKU в очереди.
+    """
+    ensure_queue_permission("operator_can_edit_qty")
+    if payload.qty <= 0:
+        raise HTTPException(status_code=400, detail="Количество должно быть больше нуля.")
+    update_queue_qty(item_id, payload.qty)
+    return {"status": "ok"}
+
+
+@app.post("/api/kiosk/queue/reorder")
+async def queue_reorder(payload: QueueReorderRequest):
+    """
+    Перестраивает очередь по списку id.
+    """
+    ensure_queue_permission("operator_can_reorder")
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="Список id пуст.")
+    reorder_queue_items(payload.item_ids)
+    return {"status": "ok"}
+
+
+@app.delete("/api/kiosk/queue/items/{item_id}")
+async def queue_delete(item_id: int):
+    """
+    Удаляет позицию из очереди.
+    """
+    ensure_queue_permission("operator_can_remove_sku_from_shift")
+    remove_queue_item(item_id)
+    return {"status": "ok"}
 
 
 @app.get("/api/kiosk/pack/plan")
