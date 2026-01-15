@@ -5,8 +5,8 @@ import numpy as np
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
-#RTSP_URL = "rtsp://admin:QsD4Fv%216@192.168.31.64:554/Streaming/Channels/102" #Урезанный поток
-RTSP_URL = "rtsp://admin:QsD4Fv%216@192.168.31.64:554/Streaming/Channels/101" #Основной поток
+#RTSP_URL = "rtsp://rtsp:QsD4Fv%216@192.168.31.64:554/Streaming/Channels/102" #Урезанный поток
+RTSP_URL = "rtsp://rtsp:QsD4Fv%216@192.168.31.64:554/Streaming/Channels/101" #Основной поток
 
 
 
