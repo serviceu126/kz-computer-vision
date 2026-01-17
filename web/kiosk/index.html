@@ -2311,7 +2311,7 @@ document.getElementById("bedDetails").textContent =
     const status = state.status || "idle";
     setStatus(status);
 
-    const cameraUrl = state.camera_stream_url || "/camera/stream";
+    const cameraUrl = state.camera_stream_url || "/api/kiosk/video/stream";
     const cameraImg = document.getElementById("cameraStream");
     if (cameraImg && cameraImg.dataset.src !== cameraUrl) {
       // Учительская подсказка: поток не перезапускаем, если URL не менялся.

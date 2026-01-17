@@ -77,6 +77,7 @@ from services.packaging import (
 from services.timers import record_timer_state, record_heartbeat
 from services import shift_plans
 from service import mjpeg_server
+from service import video_stream
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -801,7 +802,25 @@ async def get_state():
         master_id=master_id,
         master_active=bool(master_id),
     )
-    return {"status": "ok", "master_id": master_id}
+
+
+@app.get("/api/kiosk/video/stream")
+async def kiosk_video_stream():
+    """
+    Учительская подсказка: стабильный MJPEG-поток из RTSP с автопереподключением.
+    """
+    return StreamingResponse(
+        video_stream.mjpeg_stream(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.get("/api/kiosk/video/status")
+async def kiosk_video_status():
+    """
+    Учительская подсказка: отдаём статус потока, чтобы видеть перезапуски.
+    """
+    return video_stream.get_status()
 
 
 @app.post("/api/kiosk/master/logout")
