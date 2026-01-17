@@ -140,6 +140,80 @@
   // чтобы реакция на state была единой и не зависела от порядка загрузки.
   window.updateMasterActionButtons = updateMasterActionButtons;
 
+  function getCameraStreamElement() {
+    /**
+     * Учительская подсказка: ищем устойчивый элемент камеры без пересоздания DOM.
+     */
+    return (
+      document.getElementById("cameraStream") ||
+      document.querySelector("img[data-role='camera-stream']") ||
+      document.querySelector("img")
+    );
+  }
+
+  function bindCameraStreamElement() {
+    /**
+     * Учительская подсказка: перехватываем setter src, чтобы не перезапускать поток.
+     */
+    const img = getCameraStreamElement();
+    if (!img || img.dataset.streamPatched) return img;
+    const proto = Object.getPrototypeOf(img);
+    const desc = Object.getOwnPropertyDescriptor(proto, "src");
+    if (!desc || typeof desc.set !== "function" || typeof desc.get !== "function") {
+      return img;
+    }
+    Object.defineProperty(img, "src", {
+      get: desc.get.bind(img),
+      set: (value) => {
+        const next = String(value || "");
+        if (img.dataset.streamUrl === next) return;
+        desc.set.call(img, next);
+        img.dataset.streamUrl = next;
+        console.log("[camera] src set:", next);
+      },
+    });
+    img.dataset.streamPatched = "1";
+    return img;
+  }
+
+  function applyCameraStreamFromState(state) {
+    /**
+     * Учительская подсказка: обновляем поток только при изменении URL.
+     */
+    const url = (state?.camera_stream_url && state.camera_stream_url.trim())
+      ? state.camera_stream_url.trim()
+      : "/camera/stream";
+    const img = bindCameraStreamElement();
+    if (!img) return;
+    if (img.dataset.streamUrl !== url) {
+      img.src = url;
+    }
+  }
+
+  function patchRenderStateForCamera() {
+    /**
+     * Учительская подсказка: оборачиваем renderState, чтобы не трогать основной рендер.
+     */
+    if (typeof window.renderState !== "function" || window.renderState.__cameraPatched) {
+      return;
+    }
+    const originalRenderState = window.renderState;
+    window.renderState = (state) => {
+      const result = originalRenderState(state);
+      applyCameraStreamFromState(state);
+      return result;
+    };
+    window.renderState.__cameraPatched = true;
+  }
+
+  patchRenderStateForCamera();
+  const cameraPatchTimer = setInterval(() => {
+    patchRenderStateForCamera();
+    if (typeof window.renderState === "function" && window.renderState.__cameraPatched) {
+      clearInterval(cameraPatchTimer);
+    }
+  }, 500);
+
   function updateShiftPlanImportAvailability() {
     /**
      * Учительская подсказка: подсказка импорта живёт в index.html,
@@ -481,10 +555,6 @@
 
       const importedCount = Number.isFinite(data.total_items) ? data.total_items : 0;
       window.showPackToast?.(`Импортировано ${importedCount} позиций`);
-
-      if (typeof window.applyImportedShiftPlanToLocal === "function") {
-        await window.applyImportedShiftPlanToLocal(data);
-      }
     } catch (error) {
       window.showPackToast?.("Ошибка сети: файл не импортирован.");
     }
