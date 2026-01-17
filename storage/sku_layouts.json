@@ -1,0 +1,32 @@
+{
+  "TESTSKU": {
+    "slots": ["A1", "A2", "A3", "A4", "B1", "B2"],
+    "steps": [
+      {"step": 1, "slot": "A1", "part": "Направляющие боковые", "qty": 2},
+      {"step": 2, "slot": "A2", "part": "Направляющие центральные", "qty": 2},
+      {"step": 3, "slot": "A3", "part": "Направляющие поперечные", "qty": 1},
+      {"step": 4, "slot": "A4", "part": "Изголовье центральное", "qty": 1},
+      {"step": 5, "slot": "B1", "part": "Подопора", "qty": 6},
+      {"step": 6, "slot": "B2", "part": "Ламели", "qty": 32}
+    ]
+  },
+  "MORIS_PLUS": {
+    "_comment": "Учительская подсказка: C1..C4 временно замещены слотами B3/B4.",
+    "slots": ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4"],
+    "steps": [
+      {"step": 1, "slot": "A1", "part": "side_rail", "title": "Боковые царги", "qty": 2},
+      {"step": 2, "slot": "A2", "part": "center_rail", "title": "Центральные царги", "qty": 2},
+      {"step": 3, "slot": "A3", "part": "cross_rail", "title": "Поперечные царги", "qty": 1},
+      {"step": 4, "slot": "A4", "part": "head_center", "title": "Изголовье центральное", "qty": 1},
+      {"step": 5, "slot": "B1", "part": "support_leg", "title": "Опорные ножки", "qty": 6},
+      {"step": 6, "slot": "B2", "part": "slat", "title": "Ламели", "qty": 32},
+      {"step": 7, "slot": "B3", "part": "kf_pack", "title": "Комплект крепежа", "qty": 1},
+      {"step": 8, "slot": "B3", "part": "head_left", "title": "Изголовье левое", "qty": 1},
+      {"step": 9, "slot": "B4", "part": "head_right", "title": "Изголовье правое", "qty": 1},
+      {"step": 10, "slot": "B4", "part": "short_rail", "title": "Короткие царги", "qty": 2},
+      {"step": 11, "slot": "B3", "part": "decor_strip", "title": "Декоративная планка", "qty": 2},
+      {"step": 12, "slot": "B4", "part": "long_rail", "title": "Длинные царги", "qty": 2},
+      {"step": 13, "slot": "B3", "part": "long_guide", "title": "Длинные направляющие", "qty": 2}
+    ]
+  }
+}
