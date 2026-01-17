@@ -361,6 +361,51 @@
       pointer-events: none;
     }
 
+    /* Учительская подсказка: блок укладки показывает слоты и шаги. */
+    .packaging-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+      gap: var(--space-sm);
+      margin-bottom: var(--space-md);
+    }
+
+    .packaging-slot {
+      border-radius: var(--radius-sm);
+      border: var(--border-default);
+      padding: var(--space-2xs);
+      text-align: center;
+      font-size: var(--font-sm);
+      background: var(--surface-panel-soft);
+    }
+
+    .packaging-slot--active {
+      border-color: var(--accent);
+      box-shadow: var(--shadow-pill);
+      background: var(--surface-success);
+    }
+
+    .packaging-steps {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 var(--space-md);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2xs);
+      font-size: var(--font-sm);
+    }
+
+    .packaging-step {
+      padding: var(--space-2xs) var(--space-sm);
+      border-radius: var(--radius-sm);
+      border: var(--border-default);
+      background: rgba(15, 23, 42, 0.35);
+    }
+
+    .packaging-step--active {
+      border-color: var(--info);
+      background: var(--surface-info-pill);
+    }
+
     .slot {
       position: absolute;
       border-radius: var(--radius-md);
@@ -1333,6 +1378,26 @@
               </div>
             </div>
 
+            <div class="panel panel--layout" id="packagingPanel">
+              <div class="panel-header">
+                <div class="panel-title">Укладка</div>
+              </div>
+              <div class="panel-body">
+                <div class="packaging-grid" id="packagingSlots"></div>
+                <ul class="packaging-steps" id="packagingSteps"></ul>
+                <div class="pill-row pill-row--start">
+                  <div id="btnPackagingStepConfirm" class="pill-btn pill-btn--primary" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Шаг выполнен</span>
+                  </div>
+                  <div id="btnPackagingTest" class="pill-btn pill-btn--ghost" role="button" tabindex="0">
+                    <span class="dot"></span>
+                    <span>Старт TESTSKU</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div class="panel panel--steps">
               <div class="panel-header">
                 <div class="panel-title">Прогресс комплекта</div>
@@ -1924,6 +1989,10 @@
   const API_PACK_UI_STATE_URL = "/api/kiosk/pack/ui-state";
   const API_PACK_STEPS_STATE_URL = "/api/kiosk/pack/steps/state";
   const API_QUEUE_URL = "/api/kiosk/queue";
+  const API_PACKAGING_LAYOUT_URL = "/api/kiosk/packaging/layout";
+  const API_PACKAGING_START_URL = "/api/kiosk/packaging/start";
+  const API_PACKAGING_STATE_URL = "/api/kiosk/packaging/state";
+  const API_PACKAGING_STEP_CONFIRM_URL = "/api/kiosk/packaging/step/confirm";
   const SHIFT_PLAN_STORAGE_KEY = "kz_shift_plans";
   const SHIFT_PLAN_ACTIVE_KEY = "kz_shift_plan_active";
 
@@ -1958,6 +2027,7 @@
   let shiftPlanUserActiveTimer = null;
   let shiftPlanPanelSignature = "";
   let lastRenderedPlanHash = "";
+  let lastPackagingSku = null;
 
   // Настройки прав оператора приходят из backend.
   // Здесь держим их как единый объект, чтобы функции могли опираться на них.
@@ -1979,6 +2049,99 @@
     renderShiftPlanList(shiftPlanSelected ? shiftPlanSelected.items : []);
     renderPackPlanPreview();
   };
+
+  function renderPackagingLayout(layout, currentStep) {
+    /**
+     * Учительская подсказка: рисуем сетку слотов и список шагов.
+     */
+    const slotsEl = document.getElementById("packagingSlots");
+    const stepsEl = document.getElementById("packagingSteps");
+    if (!slotsEl || !stepsEl) return;
+    slotsEl.innerHTML = "";
+    stepsEl.innerHTML = "";
+
+    if (!layout) {
+      const empty = document.createElement("li");
+      empty.className = "packaging-step";
+      empty.textContent = "Layout не найден для выбранного SKU.";
+      stepsEl.appendChild(empty);
+      return;
+    }
+
+    const steps = Array.isArray(layout.steps) ? layout.steps : [];
+    const activeStep = steps.find((step) => Number(step.step) === Number(currentStep));
+    const activeSlot = activeStep ? activeStep.slot : null;
+
+    (layout.slots || []).forEach((slot) => {
+      const cell = document.createElement("div");
+      cell.className = "packaging-slot";
+      cell.textContent = slot;
+      if (activeSlot && slot === activeSlot) {
+        cell.classList.add("packaging-slot--active");
+      }
+      slotsEl.appendChild(cell);
+    });
+
+    steps.forEach((step) => {
+      const row = document.createElement("li");
+      row.className = "packaging-step";
+      row.textContent = `${step.step}. ${step.part} ×${step.qty} (слот ${step.slot})`;
+      if (Number(step.step) === Number(currentStep)) {
+        row.classList.add("packaging-step--active");
+      }
+      stepsEl.appendChild(row);
+    });
+  }
+
+  async function refreshPackagingState() {
+    /**
+     * Учительская подсказка: подтягиваем актуальный шаг и layout из backend.
+     */
+    try {
+      const resp = await fetch(API_PACKAGING_STATE_URL, { cache: "no-store" });
+      if (!resp.ok) return;
+      const data = await resp.json().catch(() => ({}));
+      renderPackagingLayout(data.layout, data.current_step);
+    } catch (error) {
+      console.warn("Не удалось обновить укладку:", error);
+    }
+  }
+
+  async function startPackagingForSku(sku) {
+    /**
+     * Учительская подсказка: запускаем укладку для выбранного SKU.
+     */
+    if (!sku) return;
+    try {
+      const resp = await fetch(API_PACKAGING_START_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku }),
+      });
+      if (!resp.ok) {
+        renderPackagingLayout(null, null);
+        return;
+      }
+      const data = await resp.json().catch(() => ({}));
+      renderPackagingLayout(data.layout, data.current_step);
+    } catch (error) {
+      console.warn("Не удалось запустить укладку:", error);
+    }
+  }
+
+  async function confirmPackagingStep() {
+    /**
+     * Учительская подсказка: подтверждаем шаг и подсвечиваем следующий.
+     */
+    try {
+      const resp = await fetch(API_PACKAGING_STEP_CONFIRM_URL, { method: "POST" });
+      if (!resp.ok) return;
+      const data = await resp.json().catch(() => ({}));
+      renderPackagingLayout(data.layout, data.current_step);
+    } catch (error) {
+      console.warn("Не удалось подтвердить шаг:", error);
+    }
+  }
 
   function saveScrollPositions() {
     /**
@@ -2126,6 +2289,8 @@
   let btnPackCloseBox = null;
   let btnPackPrintLabel = null;
   let btnPackTableEmpty = null;
+  let btnPackagingStepConfirm = null;
+  let btnPackagingTest = null;
 
   function pad(n) { return n.toString().padStart(2, "0"); }
 
@@ -2306,6 +2471,12 @@ if (skuBigEl) {
 const detailsValue = state.bed_details || "Размер — | Цвет — | Вид —";
 document.getElementById("bedDetails").textContent =
   "Модель " + bedHumanName + " | " + detailsValue;
+
+    // Учительская подсказка: при смене SKU запускаем укладку.
+    if (skuValue && skuValue !== "—" && skuValue !== lastPackagingSku) {
+      lastPackagingSku = skuValue;
+      startPackagingForSku(skuValue);
+    }
 
 
     const status = state.status || "idle";
@@ -3769,6 +3940,8 @@ function mkModalBtn(text, kind, onClick) {
   btnPackCloseBox = document.getElementById("btnPackCloseBox");
   btnPackPrintLabel = document.getElementById("btnPackPrintLabel");
   btnPackTableEmpty = document.getElementById("btnPackTableEmpty");
+  btnPackagingStepConfirm = document.getElementById("btnPackagingStepConfirm");
+  btnPackagingTest = document.getElementById("btnPackagingTest");
   const btnManualToggle = document.getElementById("btnManualToggle");
   const manualControls = document.getElementById("manualControls");
   const btnShiftPlanUpload = document.getElementById("btnShiftPlanUpload");
@@ -3829,6 +4002,19 @@ function mkModalBtn(text, kind, onClick) {
     btnPackTableEmpty.addEventListener("click", () => {
       if (btnPackTableEmpty.classList.contains("pill-btn--disabled")) return;
       handlePackAction("/api/kiosk/pack/table-empty");
+    });
+  }
+  if (btnPackagingStepConfirm) {
+    btnPackagingStepConfirm.addEventListener("click", async () => {
+      if (btnPackagingStepConfirm.classList.contains("pill-btn--disabled")) return;
+      await confirmPackagingStep();
+    });
+  }
+  if (btnPackagingTest) {
+    btnPackagingTest.addEventListener("click", async () => {
+      if (btnPackagingTest.classList.contains("pill-btn--disabled")) return;
+      lastPackagingSku = "TESTSKU";
+      await startPackagingForSku("TESTSKU");
     });
   }
 
@@ -4050,6 +4236,7 @@ function mkModalBtn(text, kind, onClick) {
   initShiftPlanCatalog();
   loadShiftPlansFromStorage();
   fetchShiftPlanFromBackend();
+  refreshPackagingState();
 
   // helper для отладочной подписи внизу
   const scanDebug = document.createElement("div");

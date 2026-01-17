@@ -83,6 +83,15 @@ from service import video_stream
 BASE_DIR = Path(__file__).resolve().parent.parent
 KIOSK_DIR = BASE_DIR / "web" / "kiosk"
 INDEX_FILE = KIOSK_DIR / "index.html"
+LAYOUTS_FILE = BASE_DIR / "storage" / "sku_layouts.json"
+
+# Учительская подсказка: layout-данные и состояние шага держим в памяти процесса.
+_layouts_cache: dict | None = None
+_packaging_state = {
+    "current_sku": None,
+    "current_step": 1,
+    "updated_at": None,
+}
 
 
 class OverlaySlot(BaseModel):
@@ -214,6 +223,10 @@ class ShiftPlanSelectRequest(BaseModel):
 
 class ShiftPlanActivateRequest(BaseModel):
     plan_id: int
+
+
+class PackagingStartRequest(BaseModel):
+    sku: str
 
 
 class MasterLoginRequest(BaseModel):
@@ -703,6 +716,28 @@ def build_usb_report_path(base_dir: Path, filename: str) -> Path:
     return target
 
 
+def _load_layouts() -> dict:
+    """
+    Учительская подсказка: читаем layout из JSON один раз, без БД.
+    """
+    global _layouts_cache
+    if _layouts_cache is not None:
+        return _layouts_cache
+    if not LAYOUTS_FILE.exists():
+        _layouts_cache = {}
+        return _layouts_cache
+    try:
+        _layouts_cache = json.loads(LAYOUTS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        _layouts_cache = {}
+    return _layouts_cache
+
+
+def _get_layout_for_sku(sku: str) -> dict | None:
+    layouts = _load_layouts()
+    return layouts.get(sku)
+
+
 app = FastAPI(title="KZ Kiosk API")
 app.mount("/camera", mjpeg_server.app)
 
@@ -802,6 +837,79 @@ async def get_state():
         master_id=master_id,
         master_active=bool(master_id),
     )
+
+
+@app.get("/api/kiosk/packaging/layout/{sku}")
+async def get_packaging_layout(sku: str):
+    """
+    Учительская подсказка: отдаём layout по SKU из JSON-файла.
+    """
+    layout = _get_layout_for_sku(sku)
+    if not layout:
+        raise HTTPException(status_code=404, detail="Layout не найден.")
+    return {"sku": sku, "layout": layout}
+
+
+@app.post("/api/kiosk/packaging/start")
+async def packaging_start(payload: PackagingStartRequest):
+    """
+    Учительская подсказка: стартуем упаковку по SKU и сбрасываем шаг на 1.
+    """
+    sku = (payload.sku or "").strip()
+    if not sku:
+        raise HTTPException(status_code=400, detail="SKU не указан.")
+    layout = _get_layout_for_sku(sku)
+    if not layout:
+        raise HTTPException(status_code=404, detail="Layout не найден.")
+    _packaging_state["current_sku"] = sku
+    _packaging_state["current_step"] = 1
+    _packaging_state["updated_at"] = time.time()
+    return {
+        "current_sku": sku,
+        "current_step": _packaging_state["current_step"],
+        "layout": layout,
+        "updated_at": _packaging_state["updated_at"],
+    }
+
+
+@app.get("/api/kiosk/packaging/state")
+async def packaging_state():
+    """
+    Учительская подсказка: отдаём текущее состояние упаковки без БД.
+    """
+    sku = _packaging_state["current_sku"]
+    layout = _get_layout_for_sku(sku) if sku else None
+    return {
+        "current_sku": sku,
+        "current_step": _packaging_state["current_step"] if sku else None,
+        "layout": layout,
+        "updated_at": _packaging_state["updated_at"],
+    }
+
+
+@app.post("/api/kiosk/packaging/step/confirm")
+async def packaging_step_confirm():
+    """
+    Учительская подсказка: подтверждаем шаг и двигаем подсветку дальше.
+    """
+    sku = _packaging_state["current_sku"]
+    if not sku:
+        raise HTTPException(status_code=409, detail="Упаковка не запущена.")
+    layout = _get_layout_for_sku(sku)
+    if not layout:
+        raise HTTPException(status_code=404, detail="Layout не найден.")
+    total_steps = len(layout.get("steps") or [])
+    current_step = int(_packaging_state["current_step"] or 1)
+    if total_steps:
+        current_step = min(current_step + 1, total_steps)
+    _packaging_state["current_step"] = current_step
+    _packaging_state["updated_at"] = time.time()
+    return {
+        "current_sku": sku,
+        "current_step": current_step,
+        "layout": layout,
+        "updated_at": _packaging_state["updated_at"],
+    }
 
 
 @app.get("/api/kiosk/video/stream")
