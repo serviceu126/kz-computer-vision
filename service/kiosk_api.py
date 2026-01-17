@@ -76,6 +76,8 @@ from services.packaging import (
 )
 from services.timers import record_timer_state, record_heartbeat
 from services import shift_plans
+from service import mjpeg_server
+from service import video_stream
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -149,7 +151,7 @@ class KioskState(BaseModel):
 
     events: List[Event]
 
-    camera_stream_url: str="http://127.0.0.1:8080/stream"
+    camera_stream_url: str = "/camera/stream"
     overlay_slots: List[OverlaySlot]
 
     # Режим мастера (супервайзер).
@@ -702,6 +704,7 @@ def build_usb_report_path(base_dir: Path, filename: str) -> Path:
 
 
 app = FastAPI(title="KZ Kiosk API")
+app.mount("/camera", mjpeg_server.app)
 
 app.mount(
     "/static",
@@ -799,7 +802,25 @@ async def get_state():
         master_id=master_id,
         master_active=bool(master_id),
     )
-    return {"status": "ok", "master_id": master_id}
+
+
+@app.get("/api/kiosk/video/stream")
+async def kiosk_video_stream():
+    """
+    Учительская подсказка: стабильный MJPEG-поток из RTSP с автопереподключением.
+    """
+    return StreamingResponse(
+        video_stream.mjpeg_stream(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.get("/api/kiosk/video/status")
+async def kiosk_video_status():
+    """
+    Учительская подсказка: отдаём статус потока, чтобы видеть перезапуски.
+    """
+    return video_stream.get_status()
 
 
 @app.post("/api/kiosk/master/logout")
@@ -1339,12 +1360,13 @@ async def shift_plan_import(file: UploadFile = File(...)):
         created_at=time.time(),
         items=items_for_storage,
     )
+    set_active_shift_plan(shift_id, plan_id)
 
     return {
         "plan_id": plan_id,
-        "plan_name": plan_name,
+        "shift_id": shift_id,
         "total_items": len(items_for_storage),
-        "normalized_items": normalized_items,
+        "activated": True,
     }
 
 

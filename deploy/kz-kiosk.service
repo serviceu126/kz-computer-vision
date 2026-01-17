@@ -1,0 +1,23 @@
+# Учительская подсказка: unit-файл для автозапуска киоска после ребута.
+[Unit]
+Description=KZ Kiosk API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kiosk
+Group=kiosk
+WorkingDirectory=/opt/kz-computer-vision
+Environment="KZ_KIOSK_HOST=0.0.0.0"
+Environment="KZ_KIOSK_PORT=8000"
+Environment="KZ_KIOSK_WORKERS=1"
+ExecStart=/opt/kz-computer-vision/deploy/start_kiosk.sh
+Restart=always
+RestartSec=2
+
+# Учительская подсказка: лимиты можно править по месту, если сервис тяжёлый.
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
