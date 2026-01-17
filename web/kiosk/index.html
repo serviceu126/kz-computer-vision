@@ -2085,7 +2085,8 @@
     steps.forEach((step) => {
       const row = document.createElement("li");
       row.className = "packaging-step";
-      row.textContent = `${step.step}. ${step.part} ×${step.qty} (слот ${step.slot})`;
+      const label = step.title || step.part || "—";
+      row.textContent = `${step.step}. ${label} ×${step.qty} (слот ${step.slot})`;
       if (Number(step.step) === Number(currentStep)) {
         row.classList.add("packaging-step--active");
       }
